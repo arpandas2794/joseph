@@ -1,0 +1,10 @@
+{
+  "name": "joseph-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "npm run dev --prefix neuron/frontend",
+    "dev:backend": "npm run dev --prefix neuron/backend",
+    "dev": "npx concurrently \"npm run dev:frontend\" \"npm run dev:backend\""
+  }
+}
