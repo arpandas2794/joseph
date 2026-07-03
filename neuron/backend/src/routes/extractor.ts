@@ -1,0 +1,445 @@
+import { Router, Request, Response } from 'express';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleAIFileManager } from '@google/generative-ai/server';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+
+const execAsync = promisify(exec);
+const router = Router();
+
+// Ensure temp directory exists inside project workspace
+const TEMP_DIR = path.join(__dirname, '../../temp');
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
+
+// Statically resolved yt-dlp path
+const YTDLP_PATH = path.join(__dirname, '../../bin/yt-dlp');
+
+async function runYtdlpWithCookies(args: string, url: string): Promise<string> {
+  const cookiesPath = path.join(__dirname, '../../cookies.txt');
+  let cookiesArg = '';
+
+  if (fs.existsSync(cookiesPath)) {
+    console.log('Using local cookies.txt for authentication');
+    cookiesArg = `--cookies "${cookiesPath}"`;
+  }
+
+  // Try running yt-dlp
+  const { stdout } = await execAsync(`"${YTDLP_PATH}" ${cookiesArg} ${args} "${url}"`, {
+    maxBuffer: 1024 * 1024 * 50 // 50MB buffer to handle massive metadata
+  });
+  return stdout;
+}
+
+// Proxy endpoint to bypass CDN hotlinking protection (CORS / 403 Forbidden)
+router.get('/proxy-image', async (req: Request, res: Response) => {
+  const imageUrl = req.query.url as string;
+  if (!imageUrl) {
+    return res.status(400).send('URL is required');
+  }
+
+  try {
+    const response = await axios.get(imageUrl, {
+      responseType: 'stream',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    res.setHeader('Content-Type', (response.headers['content-type'] as string) || 'image/jpeg');
+    // Enable caching for better performance
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    response.data.pipe(res);
+  } catch (err: any) {
+    console.error('Image proxy failed:', err.message || err);
+    res.status(500).send('Failed to fetch image');
+  }
+});
+
+// OCR all carousel slides using Gemini Vision — extracts visible text from each image
+async function ocrSlidesWithGemini(slideUrls: string[]): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return 'Gemini API key is missing. Add GEMINI_API_KEY to your .env to enable OCR on carousel slides.';
+  }
+
+  if (slideUrls.length === 0) return '';
+
+  console.log(`Running Gemini OCR on ${slideUrls.length} carousel slides...`);
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    // Download each slide image as a base64 buffer
+    const imageParts: any[] = [];
+    for (let i = 0; i < slideUrls.length; i++) {
+      const slideUrl = slideUrls[i];
+      if (!slideUrl) continue;
+      try {
+        const response = await axios.get(slideUrl, {
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+          timeout: 15000,
+        });
+        const base64 = Buffer.from(response.data as ArrayBuffer).toString('base64');
+        const contentTypeRaw = (response.headers['content-type'] as string | undefined) ?? 'image/jpeg';
+        const mimeRaw = contentTypeRaw.split(';')[0]?.trim() ?? 'image/jpeg';
+        const mimeType = (mimeRaw === 'image/png' || mimeRaw === 'image/webp') ? mimeRaw : 'image/jpeg';
+        imageParts.push({ inlineData: { data: base64, mimeType } });
+        console.log(`  Downloaded slide ${i + 1}/${slideUrls.length}`);
+      } catch (dlErr: any) {
+        console.warn(`  Failed to download slide ${i + 1}: ${dlErr.message}`);
+      }
+    }
+
+    if (imageParts.length === 0) {
+      return 'Could not download any slides for OCR.';
+    }
+
+    // Build prompt: label each image by slide number and ask Gemini to extract text
+    const slideLabels = imageParts.map((_, i) => `Slide ${i + 1}`).join(', ');
+    const prompt = `You are given ${imageParts.length} images from an Instagram carousel post (${slideLabels}).
+
+For each slide:
+1. Extract ALL visible text exactly as it appears (headlines, body text, captions, hashtags, etc.)
+2. Label each slide clearly as "--- Slide N ---"
+3. If a slide has no text, write "[No text on this slide]"
+4. Preserve the reading order and structure of the text.
+
+Do not describe the images — only extract the text content.`;
+
+    const result = await model.generateContent([...imageParts, prompt]);
+    const ocrText = result.response.text().trim();
+    console.log(`Gemini OCR complete. Extracted ${ocrText.length} characters.`);
+    return ocrText;
+  } catch (err: any) {
+    console.error('Gemini OCR failed:', err.message || err);
+    return `OCR failed: ${err.message || 'Unknown error'}`;
+  }
+}
+
+async function transcribeAudioWithGemini(audioPath: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('Gemini API key is missing. Please set GEMINI_API_KEY in your backend .env file to enable transcribing.');
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const fileManager = new GoogleAIFileManager(apiKey);
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+  console.log(`Uploading audio to Gemini API: ${audioPath}`);
+  const uploadResponse = await fileManager.uploadFile(audioPath, {
+    mimeType: 'audio/mp3',
+    displayName: path.basename(audioPath)
+  });
+
+  console.log(`Uploaded file as ${uploadResponse.file.name}. Waiting for processing...`);
+  
+  // Wait for file active state
+  let file = await fileManager.getFile(uploadResponse.file.name);
+  while (file.state === 'PROCESSING') {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    file = await fileManager.getFile(uploadResponse.file.name);
+  }
+
+  if (file.state === 'FAILED') {
+    throw new Error('Audio file processing failed on Gemini servers.');
+  }
+
+  console.log('Audio file is active. Generating transcript...');
+  const prompt = 'Please provide a highly accurate word-for-word transcript of this audio file.';
+  const result = await model.generateContent([
+    {
+      fileData: {
+        mimeType: uploadResponse.file.mimeType,
+        fileUri: uploadResponse.file.uri
+      }
+    },
+    { text: prompt },
+  ]);
+
+  const transcript = result.response.text();
+  
+  // Clean up from Gemini servers
+  try {
+    await fileManager.deleteFile(uploadResponse.file.name);
+    console.log('Cleaned up Gemini temporary file.');
+  } catch (deleteErr) {
+    console.warn('Failed to delete file from Gemini storage:', deleteErr);
+  }
+
+  return transcript;
+}
+
+async function fetchSocialMediaMetadataApify(url: string, isInstagram: boolean): Promise<any> {
+  const token = process.env.APIFY_TOKEN || process.env.APIFY_API_TOKEN;
+  if (!token) throw new Error('APIFY_TOKEN is not set');
+
+  const actorId = isInstagram ? 'apify~instagram-scraper' : 'clockwork~tiktok-scraper';
+  
+  const input = isInstagram 
+    ? { directUrls: [url], resultsType: 'details' }
+    : { urls: [url] };
+
+  console.log(`Starting Apify ${isInstagram ? 'Instagram' : 'TikTok'} scraping...`);
+  
+  // Run Apify actor
+  const runRes = await axios.post(`https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`, input);
+  const runId = runRes.data.data.id;
+  const datasetId = runRes.data.data.defaultDatasetId;
+
+  // Poll for completion
+  let finished = false;
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const statusRes = await axios.get(`https://api.apify.com/v2/acts/${actorId}/runs/${runId}?token=${token}`);
+    const status = statusRes.data.data.status;
+    
+    if (status === 'SUCCEEDED') {
+      finished = true;
+      break;
+    } else if (['FAILED', 'ABORTED', 'TIMED-OUT'].includes(status)) {
+      throw new Error(`Apify run failed with status: ${status}`);
+    }
+  }
+
+  if (!finished) throw new Error('Apify scraping timed out');
+
+  const datasetRes = await axios.get(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`);
+  const items = datasetRes.data || [];
+  const item = items[0];
+
+  if (!item) return null;
+
+  if (isInstagram) {
+    const images: string[] = item.images || [];
+    const isCarousel = images.length > 1;
+    return {
+      videoUrl: item.videoUrl,
+      thumbnail: item.displayUrl || item.thumbnailUrl,
+      title: item.caption || (isCarousel ? 'Instagram Carousel' : 'Instagram Reel'),
+      channel: item.ownerUsername || 'Instagram Creator',
+      slides: isCarousel ? images : [],
+      isCarousel,
+    };
+  } else {
+    return {
+      videoUrl: item.videoUrl || item.downloadAddr,
+      thumbnail: item.coverUrl || item.dynamicCover,
+      title: item.desc || 'TikTok Video',
+      channel: item.author?.uniqueId || 'TikTok Creator',
+      slides: [],
+      isCarousel: false,
+    };
+  }
+}
+
+async function extractWebsiteMetadata(url: string): Promise<any> {
+  try {
+    const htmlRes = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const $ = cheerio.load(htmlRes.data);
+    const title = $('title').text() || $('meta[property="og:title"]').attr('content') || '';
+    const description = $('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || '';
+    const image = $('meta[property="og:image"]').attr('content') || '';
+    
+    // Extract main text content
+    $('script, style, nav, footer, header').remove();
+    const content = $('body').text().replace(/\s+/g, ' ').trim();
+    
+    return { title, description, image, content };
+  } catch (err) {
+    return null;
+  }
+}
+
+router.post('/extract', async (req: Request, res: Response) => {
+  const { url } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+
+  try {
+    const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
+    const isInstagram = url.includes('instagram.com');
+    const isTikTok = url.includes('tiktok.com');
+    const isGoogleDocs = url.includes('docs.google.com/document');
+    const isGoogleSheets = url.includes('docs.google.com/spreadsheets');
+
+    // 0. Google Drive Extraction
+    if (isGoogleDocs || isGoogleSheets) {
+      let documentId = '';
+      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      if (match && match[1]) {
+        documentId = match[1];
+      } else {
+        return res.status(400).json({ error: 'Invalid Google Drive URL format.' });
+      }
+
+      const isDoc = isGoogleDocs;
+      const exportFormat = isDoc ? 'txt' : 'csv';
+      const exportUrl = `https://docs.google.com/${isDoc ? 'document' : 'spreadsheets'}/d/${documentId}/export?format=${exportFormat}`;
+
+      const response = await axios.get(exportUrl, { responseType: 'text' });
+      const text = response.data;
+
+      let title = isDoc ? 'Google Doc' : 'Google Sheet';
+      try {
+        const htmlRes = await axios.get(url);
+        const $ = cheerio.load(htmlRes.data);
+        const pageTitle = $('title').text();
+        if (pageTitle) {
+          title = pageTitle.replace(' - Google Docs', '').replace(' - Google Sheets', '').trim();
+        }
+      } catch (titleErr) {}
+
+      return res.json({
+        type: 'google_drive',
+        metadata: {
+          title,
+          url,
+          documentType: isDoc ? 'document' : 'spreadsheet',
+        },
+        content: text
+      });
+    }
+
+    // 1. YouTube Extraction
+    if (isYoutube) {
+      const metaStdout = await runYtdlpWithCookies('--dump-json --no-playlist', url);
+      const metadata = JSON.parse(metaStdout);
+      const videoId = metadata.id;
+      const title = metadata.title;
+      const channel = metadata.uploader;
+
+      const tempAudioPath = path.join(TEMP_DIR, `yt-${Date.now()}.mp3`);
+      await runYtdlpWithCookies(`-x --audio-format mp3 -o "${tempAudioPath}"`, url);
+
+      const transcriptText = await transcribeAudioWithGemini(tempAudioPath);
+
+      // Clean up temp file
+      if (fs.existsSync(tempAudioPath)) {
+        fs.unlinkSync(tempAudioPath);
+      }
+
+      return res.json({
+        type: 'youtube',
+        metadata: {
+          title,
+          channel,
+          videoId,
+        },
+        content: transcriptText
+      });
+    }
+
+    // 2. Instagram / TikTok Extraction
+    if (isInstagram || isTikTok) {
+      const apifyMetadata = await fetchSocialMediaMetadataApify(url, isInstagram);
+      
+      let thumbnail = '';
+      let title = isInstagram ? 'Instagram Post' : 'TikTok Video';
+      let channel = '';
+      
+      if (apifyMetadata) {
+        thumbnail = apifyMetadata.thumbnail 
+          ? `http://localhost:3001/api/proxy-image?url=${encodeURIComponent(apifyMetadata.thumbnail)}`
+          : '';
+        title = apifyMetadata.title || title;
+        channel = apifyMetadata.channel || '';
+
+        // --- Handle Carousel Post ---
+        if (apifyMetadata.isCarousel && apifyMetadata.slides && apifyMetadata.slides.length > 0) {
+          const host = req.get('host');
+          const protocol = req.protocol;
+          
+          // Proxy all slide images to avoid CORS/hotlink issues in the frontend
+          const proxiedSlides = apifyMetadata.slides.map((slideUrl: string) =>
+            `${protocol}://${host}/api/proxy-image?url=${encodeURIComponent(slideUrl)}`
+          );
+          
+          const proxyThumb = apifyMetadata.thumbnail
+            ? `${protocol}://${host}/api/proxy-image?url=${encodeURIComponent(apifyMetadata.thumbnail)}`
+            : proxiedSlides[0] || '';
+
+          // Run OCR on ALL slides using Gemini Vision
+          const ocrText = await ocrSlidesWithGemini(apifyMetadata.slides);
+
+          // Build combined content: OCR text + post caption
+          let combinedContent = '';
+          if (ocrText && !ocrText.startsWith('OCR failed') && !ocrText.startsWith('Could not')) {
+            combinedContent += ocrText;
+          }
+          if (apifyMetadata.title) {
+            combinedContent += combinedContent ? `\n\n--- Post Caption ---\n${apifyMetadata.title}` : apifyMetadata.title;
+          }
+
+          return res.json({
+            type: 'instagram_carousel',
+            metadata: {
+              url,
+              title: apifyMetadata.title || 'Instagram Carousel',
+              channel: apifyMetadata.channel || 'Instagram Creator',
+              thumbnail: proxyThumb,
+              slides: proxiedSlides,
+              slideCount: proxiedSlides.length,
+            },
+            content: combinedContent,
+          });
+        }
+      }
+
+      const tempAudioPath = path.join(TEMP_DIR, `social-${Date.now()}.mp3`);
+      await runYtdlpWithCookies(`-x --audio-format mp3 -o "${tempAudioPath}"`, apifyMetadata?.videoUrl || url);
+
+      const transcriptText = await transcribeAudioWithGemini(tempAudioPath);
+
+      // Clean up temp file
+      if (fs.existsSync(tempAudioPath)) {
+        fs.unlinkSync(tempAudioPath);
+      }
+
+      return res.json({
+        type: isInstagram ? 'instagram' : 'tiktok',
+        metadata: {
+          title,
+          channel,
+          thumbnail,
+        },
+        content: transcriptText
+      });
+    }
+
+    // 3. Fallback: Generic Website Scraper
+    const result = await extractWebsiteMetadata(url);
+    if (!result) {
+      return res.status(400).json({ error: 'Failed to extract content from URL' });
+    }
+
+    return res.json({
+      type: 'website',
+      metadata: {
+        title: result.title || 'Untitled',
+        description: result.description || '',
+        thumbnail: result.image || '',
+        url: url
+      },
+      content: result.content
+    });
+
+  } catch (error: any) {
+    console.error('Extraction error:', error.message);
+    return res.status(500).json({ error: `Failed to extract content: ${error.message}` });
+  }
+});
+
+export default router;
