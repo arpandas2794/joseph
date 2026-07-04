@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -17,41 +17,23 @@ router.post('/transcribe-voice', upload.single('audio'), async (req: Request, re
     return res.status(400).json({ error: 'No audio file provided' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     fs.unlinkSync(file.path);
-    return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+    return res.status(500).json({ error: 'GROQ_API_KEY not configured' });
   }
 
   try {
     console.log(`Transcribing voice note: ${file.originalname} (${Math.round(file.size / 1024)}KB)`);
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const groq = new Groq({ apiKey });
+    const transcription = await groq.audio.transcriptions.create({
+      file: fs.createReadStream(file.path),
+      model: "whisper-large-v3",
+      response_format: "verbose_json",
+    });
 
-    // Read the uploaded audio file as base64
-    const audioBuffer = fs.readFileSync(file.path);
-    const base64Audio = audioBuffer.toString('base64');
-
-    // Detect mime type from extension or default to webm
-    const mimeType = (file.mimetype as 'audio/webm' | 'audio/mp4' | 'audio/ogg' | 'audio/wav') || 'audio/webm';
-
-    const prompt = `Transcribe the following audio recording exactly as spoken. 
-Include all words, natural pauses (indicated by commas or line breaks), and preserve the speaker's intent.
-Format as clean, readable paragraphs. If the audio is unclear in places, do your best and continue.
-Do not add any commentary — only output the transcription.`;
-
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          data: base64Audio,
-          mimeType,
-        },
-      },
-      prompt,
-    ]);
-
-    const transcript = result.response.text().trim();
+    const transcript = transcription.text.trim();
     console.log(`Transcription complete: ${transcript.length} characters`);
 
     // Clean up temp file

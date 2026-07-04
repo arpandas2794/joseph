@@ -62,7 +62,7 @@ export const workspaceApi = {
       y: node.position?.y || 0,
       width: node.measured?.width || node.width || node.style?.width || 256,
       height: node.measured?.height || node.height || node.style?.height || 256,
-      data: node.data || {},
+      data: { ...(node.data || {}), parentId: node.parentId },
     };
 
     const { error } = await supabase.from('cards').upsert(payload, { onConflict: 'id' });

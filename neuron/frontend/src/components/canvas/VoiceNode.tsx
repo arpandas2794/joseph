@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
-import { Mic, Trash2, AlignLeft, Play } from 'lucide-react';
+import SmartHandle from './SmartHandle';
+import { Mic, Trash2, AlignLeft, Play, Pause, Loader2 } from 'lucide-react';
+import UngroupButton from './UngroupButton';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -105,6 +107,9 @@ export default function VoiceNode({ id, data, selected }: { id: string; data: an
               <AlignLeft className="w-3.5 h-3.5" />
             </button>
             
+            {/* Ungroup */}
+            <UngroupButton />
+            
             {/* Delete */}
             <button
               onClick={handleDelete}
@@ -160,7 +165,7 @@ export default function VoiceNode({ id, data, selected }: { id: string; data: an
         </div>
 
         {/* Output handle */}
-        <Handle type="source" position={Position.Right} className="!bg-purple-500 !w-3 !h-3 !border-2 !border-black" />
+        <SmartHandle type="source" position={Position.Right} className="!bg-purple-500 !w-3 !h-3 !border-2 !border-black" />
       </div>
     </>
   );

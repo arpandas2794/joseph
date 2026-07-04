@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { Trash2, GripHorizontal } from 'lucide-react';
+import UngroupButton from './UngroupButton';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -137,6 +138,9 @@ export default function AnnotationNode({ id, data, selected }: { id: string; dat
             />
           ))}
         </div>
+
+        {/* Ungroup */}
+        <UngroupButton className="flex items-center justify-center w-7 h-7 bg-black/80 backdrop-blur border border-white/10 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors" />
 
         {/* Delete */}
         <button

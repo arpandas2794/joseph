@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
+import SmartHandle from './SmartHandle';
 import { FileText, Trash2, AlignLeft, HardDrive } from 'lucide-react';
+import UngroupButton from './UngroupButton';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -115,6 +117,8 @@ export default function DriveNode({ id, data, selected }: { id: string; data: an
                 OPEN
               </button>
             )}
+            {/* Ungroup */}
+            <UngroupButton />
             {/* Delete */}
             <button
               onClick={handleDelete}
@@ -143,7 +147,7 @@ export default function DriveNode({ id, data, selected }: { id: string; data: an
         </div>
 
         {/* Output handle */}
-        <Handle 
+        <SmartHandle 
           type="source" 
           position={Position.Right} 
           className={`!w-3 !h-3 !border-2 !border-black ${isSheet ? '!bg-green-500' : '!bg-blue-500'}`} 

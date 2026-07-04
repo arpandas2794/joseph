@@ -1,10 +1,11 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Link, Globe } from 'lucide-react';
+import SmartHandle from './SmartHandle';
+import { Link, Globe, Trash2 } from 'lucide-react';
+import UngroupButton from './UngroupButton';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
-import { Trash2 } from 'lucide-react';
 
 export default function WebsiteNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
   const { id: workspaceId } = useParams<{ id: string }>();
@@ -32,13 +33,16 @@ export default function WebsiteNode({ id, data, selected }: { id: string, data: 
           <span className="text-xs font-medium uppercase tracking-wider">Website</span>
         </div>
         
-        <button 
-          onClick={handleDelete}
-          className="text-red-500 hover:text-red-400 p-1 rounded-md hover:bg-white/5 transition-colors"
-          title="Delete website card"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <UngroupButton />
+          <button 
+            onClick={handleDelete}
+            className="text-red-500 hover:text-red-400 p-1 rounded-md hover:bg-white/5 transition-colors"
+            title="Delete website card"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
       
       {/* Preview Image */}
@@ -71,7 +75,7 @@ export default function WebsiteNode({ id, data, selected }: { id: string, data: 
         </a>
       </div>
 
-      <Handle type="source" position={Position.Right} className="!bg-blue-500 !w-3 !h-3 !border-2 !border-black" />
+      <SmartHandle type="source" position={Position.Right} className="!bg-blue-500 !w-3 !h-3 !border-2 !border-black" />
     </div>
   );
 }

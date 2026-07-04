@@ -7,6 +7,7 @@ import {
   Panel,
   MarkerType,
   SelectionMode,
+  BackgroundVariant,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -20,11 +21,13 @@ import CarouselNode from './CarouselNode';
 import AnnotationNode from './AnnotationNode';
 import VoiceNode from './VoiceNode';
 import DriveNode from './DriveNode';
+import LoomNode from './LoomNode';
 import DottedDeleteEdge from './DottedDeleteEdge';
-import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive } from 'lucide-react';
+import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive, Video, Layers } from 'lucide-react';
 import { workspaceApi } from '../../lib/api';
+import { layoutGroupChildren } from '../../utils/gridLayout';
 
-type Platform = 'youtube' | 'instagram' | 'tiktok' | 'google_drive';
+type Platform = 'youtube' | 'instagram' | 'tiktok' | 'google_drive' | 'loom' | 'instagram_carousel';
 
 const PLATFORM_CONFIG: Record<Platform, {
   label: string;
@@ -53,6 +56,15 @@ const PLATFORM_CONFIG: Record<Platform, {
     placeholder: 'https://instagram.com/reel/... or /p/...',
     hint: 'Paste a Reel URL for a video card, or a /p/ post URL for a carousel with OCR.',
   },
+  instagram_carousel: {
+    label: 'Instagram Carousel',
+    icon: <Camera className="w-4 h-4" />,
+    color: 'bg-pink-500',
+    border: 'border-pink-500/20',
+    accent: 'text-pink-500',
+    placeholder: 'Paste Instagram Carousel URL...',
+    hint: 'Works with public carousels'
+  },
   tiktok: {
     label: 'TikTok',
     icon: <Music2 className="w-4 h-4" />,
@@ -70,6 +82,15 @@ const PLATFORM_CONFIG: Record<Platform, {
     accent: 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20',
     placeholder: 'https://docs.google.com/document/d/...',
     hint: 'Paste a public Google Doc or Google Sheet link (Anyone with the link can view) to extract text.',
+  },
+  loom: {
+    label: 'Loom',
+    icon: <Video className="w-4 h-4" />,
+    color: 'text-[#625DF5]',
+    border: 'border-[#625DF5]',
+    accent: 'bg-[#625DF5] hover:bg-[#514deb] shadow-[#625DF5]/20',
+    placeholder: 'https://www.loom.com/share/...',
+    hint: 'Paste a Loom video URL to extract the transcript.',
   }
 };
 
@@ -84,6 +105,7 @@ const nodeTypes = {
   annotation: AnnotationNode,
   voice: VoiceNode,
   google_drive: DriveNode,
+  loom: LoomNode,
 };
 
 const edgeTypes = {
@@ -107,6 +129,7 @@ export default function Canvas({ workspaceId }: CanvasProps) {
   const [linkUrl, setLinkUrl] = React.useState('');
   const [extracting, setExtracting] = React.useState(false);
   const [extractError, setExtractError] = React.useState('');
+  const [isGroupingMode, setIsGroupingMode] = React.useState(false);
 
   // Voice Recording State
   const [showVoiceModal, setShowVoiceModal] = React.useState(false);
@@ -138,7 +161,9 @@ export default function Canvas({ workspaceId }: CanvasProps) {
           height: card.height || (card.type === 'youtube' ? 240 : ['instagram', 'tiktok'].includes(card.type) ? 400 : card.type === 'instagram_carousel' ? 420 : 256)
         },
         data: card.data || {},
+        parentId: card.data?.parentId || undefined,
       }));
+      initialNodes.sort((a: any, b: any) => (a.type === 'group' ? -1 : 1) - (b.type === 'group' ? -1 : 1));
       setNodes(initialNodes);
 
       // Map DB connections to React Flow edges
@@ -150,6 +175,82 @@ export default function Canvas({ workspaceId }: CanvasProps) {
       setEdges(initialEdges);
     }).catch(console.error);
   }, [workspaceId, setNodes, setEdges]);
+
+  const handleToggleGroupMode = () => {
+    setIsGroupingMode(true);
+    setNodes(nodes.map(n => ({ ...n, selected: false })));
+  };
+
+  const onSelectionEnd = useCallback(() => {
+    if (!isGroupingMode) return;
+    
+    const state = useCanvasStore.getState();
+    const currentNodes = state.nodes;
+    const selectedNodes = currentNodes.filter(n => n.selected && n.type !== 'group' && n.type !== 'annotation' && !n.parentId);
+    
+    if (selectedNodes.length === 0) {
+      setIsGroupingMode(false);
+      return;
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selectedNodes.forEach(n => {
+      const w = Number(n.style?.width || 256);
+      const h = Number(n.style?.height || 256);
+      if (n.position.x < minX) minX = n.position.x;
+      if (n.position.y < minY) minY = n.position.y;
+      if (n.position.x + w > maxX) maxX = n.position.x + w;
+      if (n.position.y + h > maxY) maxY = n.position.y + h;
+    });
+
+    const paddingX = 40;
+    const paddingYTop = 60;
+    const paddingYBottom = 40;
+
+    const groupX = minX - paddingX;
+    const groupY = minY - paddingYTop;
+    const groupW = (maxX - minX) + (paddingX * 2);
+    const groupH = (maxY - minY) + paddingYTop + paddingYBottom;
+    const groupId = crypto.randomUUID();
+
+    const newGroupNode = {
+      id: groupId,
+      type: 'group',
+      position: { x: groupX, y: groupY },
+      style: { width: groupW, height: groupH, zIndex: -1 },
+      data: { title: 'Untitled Group', count: selectedNodes.length },
+    };
+
+    let groupChildren = currentNodes
+      .filter(n => selectedNodes.some(sn => sn.id === n.id))
+      .map(n => ({
+        ...n,
+        parentId: groupId,
+        data: { ...n.data, originalPosition: (n as any).positionAbsolute || n.position },
+        selected: false,
+      }));
+
+    const { updatedChildren, newGroupStyle } = layoutGroupChildren(newGroupNode, groupChildren);
+    newGroupNode.style = newGroupStyle as any;
+
+    const updatedNodes = currentNodes.map(n => {
+      const childMatch = updatedChildren.find(c => c.id === n.id);
+      if (childMatch) return childMatch;
+      return n;
+    });
+
+    // Group node MUST come before its children in the nodes array for React Flow to bind them correctly
+    state.setNodes([newGroupNode, ...updatedNodes]);
+    setIsGroupingMode(false);
+
+    try {
+      workspaceApi.upsertCard(workspaceId, newGroupNode);
+      Promise.all(updatedChildren.map(c => workspaceApi.upsertCard(workspaceId, c)));
+      state.setLastSaved(new Date());
+    } catch (err) {
+      console.error('Failed to save group', err);
+    }
+  }, [isGroupingMode, workspaceId]);
 
   const handleAddSticky = async () => {
     const newNode = {
@@ -181,6 +282,7 @@ export default function Canvas({ workspaceId }: CanvasProps) {
     const isInstagramUrl = urlLower.includes('instagram.com');
     const isTikTokUrl = urlLower.includes('tiktok.com');
     const isGoogleDriveUrl = urlLower.includes('docs.google.com/document') || urlLower.includes('docs.google.com/spreadsheets');
+    const isLoomUrl = urlLower.includes('loom.com/share');
 
     if (activePlatform === 'youtube' && !isYoutubeUrl) {
       setExtractError('This doesn\'t look like a YouTube URL. Please paste a youtube.com or youtu.be link.');
@@ -198,39 +300,151 @@ export default function Canvas({ workspaceId }: CanvasProps) {
       setExtractError('This doesn\'t look like a Google Doc or Google Sheet URL. Please paste a docs.google.com link.');
       return;
     }
+    if (activePlatform === 'loom' && !isLoomUrl) {
+      setExtractError('This doesn\'t look like a Loom URL. Please paste a loom.com/share/ link.');
+      return;
+    }
     // ─────────────────────────────────────────────────────────────────────
 
-    setExtracting(true);
-    setExtractError('');
-    try {
-      const extracted = await workspaceApi.extractLink(linkUrl);
+    const nodeId = crypto.randomUUID();
+    
+    // --- Immediate UI Update ---
+    let initialData: any = { status: 'processing', metadata: { title: 'Extracting...' }, content: 'Extraction in progress...' };
+    let initialType = activePlatform || 'website';
+    let width = 320;
+    let height = 280;
 
+    if (activePlatform === 'youtube') {
+      // Try to parse video ID immediately for thumbnail
+      let videoId = '';
+      if (linkUrl.includes('youtu.be/')) {
+        videoId = linkUrl.split('youtu.be/')[1]?.split('?')[0];
+      } else if (linkUrl.includes('youtube.com/watch')) {
+        try {
+          const urlParams = new URLSearchParams(new URL(linkUrl).search);
+          videoId = urlParams.get('v') || '';
+        } catch(e) {}
+      }
+      initialData = {
+        type: 'youtube',
+        status: 'processing',
+        metadata: {
+          videoId: videoId || 'unknown',
+          title: 'Processing Transcript...',
+          channel: 'Fetching details...'
+        },
+        content: 'Transcription in progress... please wait.'
+      };
+      height = 280;
+    } else if (activePlatform === 'loom') {
+      let videoId = '';
+      if (linkUrl.includes('loom.com/share/')) {
+        videoId = linkUrl.split('loom.com/share/')[1]?.split('?')[0];
+      }
+      initialData = {
+        type: 'loom',
+        status: 'processing',
+        metadata: {
+          videoId,
+          title: 'Processing Transcript...',
+          channel: 'Fetching details...'
+        },
+        content: 'Transcription in progress... please wait.'
+      };
+      height = 280;
+    } else if (activePlatform === 'instagram') {
+      const isCarousel = linkUrl.includes('/p/');
+      initialType = isCarousel ? 'instagram_carousel' : 'instagram';
+      initialData = {
+        type: initialType,
+        status: 'processing',
+        metadata: {
+          title: isCarousel ? 'Extracting Slides...' : 'Processing Reel...',
+        },
+        content: isCarousel ? 'Reading text from images...' : 'Transcription in progress...'
+      };
+      height = isCarousel ? 420 : 400;
+    } else if (activePlatform === 'tiktok') {
+      initialType = 'tiktok';
+      initialData = {
+        type: initialType,
+        status: 'processing',
+        metadata: {
+          title: 'Processing TikTok...',
+        },
+        content: 'Transcription in progress...'
+      };
+      height = 400;
+    } else {
+      height = 400; // default for shorts/reels
+    }
+
+    const newNode = {
+      id: nodeId,
+      type: initialType,
+      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      style: { width, height },
+      data: initialData,
+    };
+
+    // Immediately add to canvas and DB so the user sees it
+    addNode(newNode);
+    try {
+      await workspaceApi.upsertCard(workspaceId, newNode);
+    } catch (err) {
+      console.error('Failed to create placeholder node in DB', err);
+    }
+    
+    // Close modal instantly
+    setShowLinkModal(false);
+    setLinkUrl('');
+    setExtractError('');
+    setExtracting(false); // We can unset this since modal is gone
+
+    // --- Background Extraction Process ---
+    // Do NOT await this so the function returns and UI doesn't block
+    workspaceApi.extractLink(linkUrl).then(async (extracted) => {
       const isYoutube = extracted.type === 'youtube';
       const isShorts = ['instagram', 'tiktok'].includes(extracted.type);
       const isCarousel = extracted.type === 'instagram_carousel';
       const isGoogleDrive = extracted.type === 'google_drive';
-      const newNode = {
-        id: crypto.randomUUID(),
+      
+      const finalNode = {
+        ...newNode,
         type: extracted.type,
-        position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
         style: {
-          width: ['youtube', 'instagram', 'tiktok', 'instagram_carousel', 'google_drive'].includes(extracted.type) ? 320 : 288,
-          height: isYoutube ? 280 : isCarousel ? 420 : isShorts ? 400 : isGoogleDrive ? 400 : 220
+          width: ['youtube', 'instagram', 'tiktok', 'instagram_carousel', 'google_drive', 'loom'].includes(extracted.type) ? 320 : 288,
+          height: isYoutube || extracted.type === 'loom' ? 280 : isCarousel ? 420 : isShorts ? 400 : isGoogleDrive ? 400 : 220
         },
-        data: extracted,
+        data: { ...extracted, status: 'completed' },
       };
 
-      addNode(newNode);
+      // Update the node locally
+      useCanvasStore.getState().setNodes(
+        useCanvasStore.getState().nodes.map(n => n.id === nodeId ? finalNode : n)
+      );
 
-      await workspaceApi.upsertCard(workspaceId, newNode);
+      // Save final node to DB
+      await workspaceApi.upsertCard(workspaceId, finalNode);
       useCanvasStore.getState().setLastSaved(new Date());
-      setShowLinkModal(false);
-      setLinkUrl('');
-    } catch (err: any) {
-      setExtractError(err.message || 'Failed to extract link');
-    } finally {
-      setExtracting(false);
-    }
+
+    }).catch((err) => {
+      console.error('Extraction failed in background:', err);
+      // Update node to show error
+      const errorNode = {
+        ...newNode,
+        data: {
+          ...newNode.data,
+          status: 'error',
+          content: 'Extraction failed: ' + (err.message || 'Unknown error'),
+          metadata: { ...newNode.data.metadata, title: 'Extraction Failed' }
+        }
+      };
+      useCanvasStore.getState().setNodes(
+        useCanvasStore.getState().nodes.map(n => n.id === nodeId ? errorNode : n)
+      );
+      workspaceApi.upsertCard(workspaceId, errorNode).catch(console.error);
+    });
   };
 
   const handleConnect = async (connection: any) => {
@@ -378,8 +592,130 @@ export default function Canvas({ workspaceId }: CanvasProps) {
   const onNodeDragStop = useCallback(
     async (event: any, node: any) => {
       try {
-        await workspaceApi.upsertCard(workspaceId, node);
-        useCanvasStore.getState().setLastSaved(new Date());
+        const state = useCanvasStore.getState();
+        const currentNodes = state.nodes;
+        let updatedNode = { ...node };
+
+        // Handle dropping into/out of groups
+        if (updatedNode.type !== 'group' && updatedNode.type !== 'annotation') {
+          let skipGroupLogic = false;
+          if (updatedNode.parentId) {
+            const parentNode = currentNodes.find(n => n.id === updatedNode.parentId);
+            if (parentNode && parentNode.selected) {
+              skipGroupLogic = true;
+            }
+          }
+
+          if (!skipGroupLogic) {
+            const groupNodes = currentNodes.filter(n => n.type === 'group' && n.id !== updatedNode.id);
+          const droppedGroup = groupNodes.find(g => {
+            const gX = g.position.x;
+            const gY = g.position.y;
+            const gW = Number(g.style?.width || 0);
+            const gH = Number(g.style?.height || 0);
+            let absX = updatedNode.position.x;
+            let absY = updatedNode.position.y;
+            if (updatedNode.parentId) {
+              const p = currentNodes.find(n => n.id === updatedNode.parentId);
+              if (p) {
+                absX += p.position.x;
+                absY += p.position.y;
+              }
+            }
+const nX = (updatedNode as any).positionAbsolute?.x || absX;
+const nY = (updatedNode as any).positionAbsolute?.y || absY;
+            
+            // Check if center of dragged node is inside the group bounds
+            const nodeW = Number(updatedNode.style?.width || 256);
+            const nodeH = Number(updatedNode.style?.height || 256);
+            const centerX = nX + (nodeW / 2);
+            const centerY = nY + (nodeH / 2);
+
+            return centerX >= gX && centerX <= gX + gW && centerY >= gY && centerY <= gY + gH;
+          });
+
+          if (droppedGroup && updatedNode.parentId !== droppedGroup.id) {
+            
+            // Need absolute coords for accurate relative math
+            let absX = updatedNode.position.x;
+            let absY = updatedNode.position.y;
+            if (updatedNode.parentId) {
+              const p = currentNodes.find(n => n.id === updatedNode.parentId);
+              if (p) {
+                absX += p.position.x;
+                absY += p.position.y;
+              }
+            }
+const currentAbsX = (updatedNode as any).positionAbsolute?.x ?? absX;
+const currentAbsY = (updatedNode as any).positionAbsolute?.y ?? absY;
+
+            updatedNode.parentId = droppedGroup.id;
+            updatedNode.data = { ...updatedNode.data, originalPosition: { x: currentAbsX, y: currentAbsY } };
+            
+            const groupChildren = currentNodes.filter(n => n.parentId === droppedGroup.id && n.id !== updatedNode.id);
+            groupChildren.push(updatedNode);
+
+            const { updatedChildren, newGroupStyle } = layoutGroupChildren(droppedGroup, groupChildren);
+            
+            const newNodes = currentNodes.map(n => {
+              if (n.id === droppedGroup.id) return { ...droppedGroup, style: newGroupStyle };
+              const childMatch = updatedChildren.find(c => c.id === n.id);
+              if (childMatch) return childMatch;
+              return n;
+            });
+            
+            newNodes.sort((a, b) => (a.type === 'group' ? -1 : 1) - (b.type === 'group' ? -1 : 1));
+            state.setNodes(newNodes);
+            
+            workspaceApi.upsertCard(workspaceId, { ...droppedGroup, style: newGroupStyle });
+            updatedChildren.forEach(c => workspaceApi.upsertCard(workspaceId, c));
+            
+          } else if (!droppedGroup && updatedNode.parentId) {
+            let absX = updatedNode.position.x;
+            let absY = updatedNode.position.y;
+            const previousGroupId = updatedNode.parentId;
+            const p = currentNodes.find(n => n.id === previousGroupId);
+            if (p) {
+              absX += p.position.x;
+              absY += p.position.y;
+            }
+            
+            updatedNode.parentId = undefined;
+            if (updatedNode.data?.originalPosition) {
+              updatedNode.position = updatedNode.data.originalPosition;
+              const { originalPosition, ...restData } = updatedNode.data;
+              updatedNode.data = restData;
+            } else {
+              updatedNode.position = {
+x: (updatedNode as any).positionAbsolute?.x ?? absX,
+y: (updatedNode as any).positionAbsolute?.y ?? absY,
+              };
+            }
+            
+            const previousGroupNode = currentNodes.find(n => n.id === previousGroupId);
+            const remainingChildren = currentNodes.filter(n => n.parentId === previousGroupId && n.id !== updatedNode.id);
+            
+            let finalNodes = currentNodes.map(n => n.id === updatedNode.id ? updatedNode : n);
+            
+            if (previousGroupNode) {
+              const { updatedChildren, newGroupStyle } = layoutGroupChildren(previousGroupNode, remainingChildren);
+              finalNodes = finalNodes.map(n => {
+                if (n.id === previousGroupId) return { ...previousGroupNode, style: newGroupStyle };
+                const childMatch = updatedChildren.find(c => c.id === n.id);
+                if (childMatch) return childMatch;
+                return n;
+              });
+              workspaceApi.upsertCard(workspaceId, { ...previousGroupNode, style: newGroupStyle });
+              updatedChildren.forEach(c => workspaceApi.upsertCard(workspaceId, c));
+            }
+            
+            state.setNodes(finalNodes);
+          }
+        }
+      }
+
+        await workspaceApi.upsertCard(workspaceId, updatedNode);
+        state.setLastSaved(new Date());
       } catch (err) {
         console.error('Failed to save position', err);
       }
@@ -407,6 +743,11 @@ export default function Canvas({ workspaceId }: CanvasProps) {
       return false;
     }
 
+    // Group nodes should only connect to Chat nodes
+    if (sourceNode?.type === 'group' && targetNode?.type !== 'chat') {
+      return false;
+    }
+
     return true;
   }, [nodes]);
 
@@ -426,96 +767,165 @@ export default function Canvas({ workspaceId }: CanvasProps) {
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         minZoom={0.1}
         maxZoom={4}
-        panOnDrag={false}
-        selectionOnDrag={true}
+        panOnDrag={!isGroupingMode}
+        selectionOnDrag={isGroupingMode}
         selectionMode={SelectionMode.Partial}
+        onSelectionEnd={onSelectionEnd}
         panOnScroll={true}
         className="touch-none"
       >
-        <div className="opacity-10 absolute inset-0 pointer-events-none">
-          <Background color="#aa3bff" gap={24} size={1} />
+        <div className="absolute inset-0 pointer-events-none">
+          <Background color="#3f3f46" variant={BackgroundVariant.Dots} gap={20} size={1.5} />
         </div>
-        <Controls />
+        <Controls 
+          className="!bg-[#18181b]/80 backdrop-blur-xl !border-white/5 !rounded-2xl !shadow-2xl overflow-hidden [&>button]:!bg-transparent [&>button]:!border-b-white/5 [&>button:last-child]:!border-b-0 hover:[&>button]:!bg-white/10 [&>button>svg]:!fill-gray-400 hover:[&>button>svg]:!fill-white transition-all" 
+          showInteractive={false} 
+        />
         <MiniMap
           nodeColor={(n) => {
             if (n.type === 'sticky') return '#eab308';
-            if (n.type === 'website') return '#3b82f6';
             if (n.type === 'youtube') return '#ef4444';
             if (n.type === 'instagram') return '#e1306c';
             if (n.type === 'tiktok') return '#00f2fe';
             if (n.type === 'instagram_carousel') return '#c026d3';
-            return '#333';
+            if (n.type === 'website') return '#6366f1';
+            if (n.type === 'loom') return '#625DF5';
+            return '#3f3f46';
           }}
-          className="bg-black/50 border border-white/10 rounded-lg overflow-hidden"
-          maskColor="rgba(0,0,0,0.5)"
+          className="!bg-[#18181b]/90 !border-white/5 !rounded-2xl !shadow-2xl overflow-hidden backdrop-blur-xl"
+          maskColor="rgba(0,0,0,0.6)"
+          nodeBorderRadius={6}
+          nodeStrokeWidth={0}
         />
 
-        <Panel position="bottom-center" className="mb-4">
-          <div className="flex items-center gap-1 bg-black/80 backdrop-blur-xl border border-white/10 p-1.5 rounded-2xl shadow-2xl">
-            {/* Sticky */}
-            <button
-              onClick={handleAddSticky}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-white/10 rounded-xl transition-colors font-medium text-yellow-400"
-            >
-              <Plus className="w-4 h-4" /> Sticky
-            </button>
+        <Panel position="bottom-center" className="mb-6">
+          <div className="flex items-center gap-2 bg-[#18181b]/90 backdrop-blur-xl border border-white/5 px-4 py-2.5 rounded-2xl shadow-2xl">
+            {/* Group */}
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={handleToggleGroupMode}
+                className={`p-2.5 rounded-xl transition-all hover:scale-105 active:scale-95 ${
+                  isGroupingMode ? 'bg-purple-500/20 text-purple-400 border border-purple-500/50' : 'hover:bg-white/10 text-white'
+                }`}
+              >
+                <Layers className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                {isGroupingMode ? 'Draw group box...' : 'Create Group'}
+              </span>
+            </div>
 
-            <div className="w-px h-5 bg-white/10" />
+            <div className="w-px h-6 bg-white/10 mx-1" />
+
+            {/* Sticky */}
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={handleAddSticky}
+                className="p-2.5 hover:bg-yellow-500/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-yellow-400"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                Sticky Note
+              </span>
+            </div>
+
+            <div className="w-px h-6 bg-white/10 mx-1" />
 
             {/* YouTube */}
-            <button
-              onClick={() => openPlatformModal('youtube')}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-red-500/10 rounded-xl transition-colors font-medium text-red-400"
-            >
-              <PlayCircle className="w-4 h-4" /> YouTube
-            </button>
-
-            <div className="w-px h-5 bg-white/10" />
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={() => openPlatformModal('youtube')}
+                className="p-2.5 hover:bg-red-500/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-red-500"
+              >
+                <PlayCircle className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                YouTube
+              </span>
+            </div>
 
             {/* Instagram */}
-            <button
-              onClick={() => openPlatformModal('instagram')}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-pink-500/10 rounded-xl transition-colors font-medium text-pink-400"
-            >
-              <Camera className="w-4 h-4" /> Instagram
-            </button>
-
-            <div className="w-px h-5 bg-white/10" />
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={() => openPlatformModal('instagram')}
+                className="p-2.5 hover:bg-pink-500/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-pink-500"
+              >
+                <Camera className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                Instagram
+              </span>
+            </div>
 
             {/* TikTok */}
-            <button
-              onClick={() => openPlatformModal('tiktok')}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-cyan-400/10 rounded-xl transition-colors font-medium text-cyan-400"
-            >
-              <Music2 className="w-4 h-4" /> TikTok
-            </button>
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={() => openPlatformModal('tiktok')}
+                className="p-2.5 hover:bg-cyan-400/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-cyan-400"
+              >
+                <Music2 className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                TikTok
+              </span>
+            </div>
 
-            <div className="w-px h-5 bg-white/10" />
+            {/* Loom */}
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={() => openPlatformModal('loom')}
+                className="p-2.5 hover:bg-[#625DF5]/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-[#625DF5]"
+              >
+                <Video className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                Loom
+              </span>
+            </div>
+
+            <div className="w-px h-6 bg-white/10 mx-1" />
 
             {/* Annotation */}
-            <button
-              onClick={handleAddAnnotation}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-orange-400/10 rounded-xl transition-colors font-medium text-orange-400"
-            >
-              <Type className="w-4 h-4" /> Annotation
-            </button>
-            {/* Voice Note */}
-            <button
-              onClick={() => setShowVoiceModal(true)}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-purple-500/10 rounded-xl transition-colors font-medium text-purple-400"
-            >
-              <Mic className="w-4 h-4" /> Voice Note
-            </button>
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={handleAddAnnotation}
+                className="p-2.5 hover:bg-orange-400/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-orange-400"
+              >
+                <Type className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                Annotation
+              </span>
+            </div>
 
-            <div className="w-px h-5 bg-white/10" />
+            {/* Voice Note */}
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={() => setShowVoiceModal(true)}
+                className="p-2.5 hover:bg-purple-500/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-purple-400"
+              >
+                <Mic className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                Voice Note
+              </span>
+            </div>
+
+            <div className="w-px h-6 bg-white/10 mx-1" />
 
             {/* Google Drive */}
-            <button
-              onClick={() => openPlatformModal('google_drive')}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-blue-500/10 rounded-xl transition-colors font-medium text-blue-400"
-            >
-              <HardDrive className="w-4 h-4" /> Google Drive
-            </button>
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={() => openPlatformModal('google_drive')}
+                className="p-2.5 hover:bg-blue-500/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-blue-500"
+              >
+                <HardDrive className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                Google Drive
+              </span>
+            </div>
           </div>
         </Panel>
       </ReactFlow>

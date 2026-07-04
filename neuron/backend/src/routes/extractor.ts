@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleAIFileManager } from '@google/generative-ai/server';
+import Groq from 'groq-sdk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -74,7 +75,15 @@ async function ocrSlidesWithGemini(slideUrls: string[]): Promise<string> {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const modelNames = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+  let model: any = null;
+  for (const modelName of modelNames) {
+    try {
+      model = genAI.getGenerativeModel({ model: modelName });
+      break;
+    } catch (_) {}
+  }
+  if (!model) model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     // Download each slide image as a base64 buffer
     const imageParts: any[] = [];
@@ -116,68 +125,52 @@ For each slide:
 
 Do not describe the images — only extract the text content.`;
 
-    const result = await model.generateContent([...imageParts, prompt]);
-    const ocrText = result.response.text().trim();
-    console.log(`Gemini OCR complete. Extracted ${ocrText.length} characters.`);
-    return ocrText;
+    let ocrText = '';
+    const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+    for (const modelName of models) {
+      try {
+        const m = genAI.getGenerativeModel({ model: modelName });
+        const result = await m.generateContent([...imageParts, prompt]);
+        ocrText = result.response.text().trim();
+        console.log(`Gemini OCR complete with ${modelName}. Extracted ${ocrText.length} characters.`);
+        break;
+      } catch (err: any) {
+        if (err.message?.includes('503') || err.message?.includes('overloaded') || err.message?.includes('high demand')) {
+          console.warn(`${modelName} unavailable (503), trying next model...`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    return ocrText || 'OCR returned no text.';
   } catch (err: any) {
     console.error('Gemini OCR failed:', err.message || err);
     return `OCR failed: ${err.message || 'Unknown error'}`;
   }
 }
 
-async function transcribeAudioWithGemini(audioPath: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+async function transcribeAudioWithGroq(audioPath: string): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    throw new Error('Gemini API key is missing. Please set GEMINI_API_KEY in your backend .env file to enable transcribing.');
+    throw new Error('Groq API key is missing. Please set GROQ_API_KEY in your backend .env file to enable transcribing.');
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const fileManager = new GoogleAIFileManager(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const groq = new Groq({ apiKey });
+  console.log(`Uploading audio to Groq Whisper API: ${audioPath}`);
 
-  console.log(`Uploading audio to Gemini API: ${audioPath}`);
-  const uploadResponse = await fileManager.uploadFile(audioPath, {
-    mimeType: 'audio/mp3',
-    displayName: path.basename(audioPath)
-  });
-
-  console.log(`Uploaded file as ${uploadResponse.file.name}. Waiting for processing...`);
-  
-  // Wait for file active state
-  let file = await fileManager.getFile(uploadResponse.file.name);
-  while (file.state === 'PROCESSING') {
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    file = await fileManager.getFile(uploadResponse.file.name);
-  }
-
-  if (file.state === 'FAILED') {
-    throw new Error('Audio file processing failed on Gemini servers.');
-  }
-
-  console.log('Audio file is active. Generating transcript...');
-  const prompt = 'Please provide a highly accurate word-for-word transcript of this audio file.';
-  const result = await model.generateContent([
-    {
-      fileData: {
-        mimeType: uploadResponse.file.mimeType,
-        fileUri: uploadResponse.file.uri
-      }
-    },
-    { text: prompt },
-  ]);
-
-  const transcript = result.response.text();
-  
-  // Clean up from Gemini servers
   try {
-    await fileManager.deleteFile(uploadResponse.file.name);
-    console.log('Cleaned up Gemini temporary file.');
-  } catch (deleteErr) {
-    console.warn('Failed to delete file from Gemini storage:', deleteErr);
+    const transcription = await groq.audio.transcriptions.create({
+      file: fs.createReadStream(audioPath),
+      model: "whisper-large-v3",
+      response_format: "verbose_json",
+    });
+    
+    console.log('Transcript generated with Groq whisper-large-v3.');
+    return transcription.text || '';
+  } catch (err: any) {
+    console.error('Groq transcription failed:', err.message || err);
+    throw new Error('Groq transcription failed: ' + (err.message || 'Unknown error'));
   }
-
-  return transcript;
 }
 
 async function fetchSocialMediaMetadataApify(url: string, isInstagram: boolean): Promise<any> {
@@ -270,6 +263,7 @@ router.post('/extract', async (req: Request, res: Response) => {
 
   try {
     const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
+    const isLoom = url.includes('loom.com/share');
     const isInstagram = url.includes('instagram.com');
     const isTikTok = url.includes('tiktok.com');
     const isGoogleDocs = url.includes('docs.google.com/document');
@@ -313,18 +307,20 @@ router.post('/extract', async (req: Request, res: Response) => {
       });
     }
 
-    // 1. YouTube Extraction
-    if (isYoutube) {
+    // 1. YouTube & Loom Extraction
+    if (isYoutube || isLoom) {
       const metaStdout = await runYtdlpWithCookies('--dump-json --no-playlist', url);
       const metadata = JSON.parse(metaStdout);
-      const videoId = metadata.id;
-      const title = metadata.title;
-      const channel = metadata.uploader;
+      const videoId = metadata.id || 'unknown';
+      const title = metadata.title || (isLoom ? 'Loom Video' : 'YouTube Video');
+      const channel = metadata.uploader || (isLoom ? 'Loom Creator' : 'YouTube Channel');
+      const thumbnail = metadata.thumbnail || '';
 
-      const tempAudioPath = path.join(TEMP_DIR, `yt-${Date.now()}.mp3`);
+      const prefix = isLoom ? 'loom' : 'yt';
+      const tempAudioPath = path.join(TEMP_DIR, `${prefix}-${Date.now()}.mp3`);
       await runYtdlpWithCookies(`-x --audio-format mp3 -o "${tempAudioPath}"`, url);
 
-      const transcriptText = await transcribeAudioWithGemini(tempAudioPath);
+      const transcriptText = await transcribeAudioWithGroq(tempAudioPath);
 
       // Clean up temp file
       if (fs.existsSync(tempAudioPath)) {
@@ -332,11 +328,12 @@ router.post('/extract', async (req: Request, res: Response) => {
       }
 
       return res.json({
-        type: 'youtube',
+        type: isLoom ? 'loom' : 'youtube',
         metadata: {
           title,
           channel,
           videoId,
+          thumbnail,
         },
         content: transcriptText
       });
@@ -401,7 +398,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       const tempAudioPath = path.join(TEMP_DIR, `social-${Date.now()}.mp3`);
       await runYtdlpWithCookies(`-x --audio-format mp3 -o "${tempAudioPath}"`, apifyMetadata?.videoUrl || url);
 
-      const transcriptText = await transcribeAudioWithGemini(tempAudioPath);
+      const transcriptText = await transcribeAudioWithGroq(tempAudioPath);
 
       // Clean up temp file
       if (fs.existsSync(tempAudioPath)) {

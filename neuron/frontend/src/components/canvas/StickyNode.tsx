@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
+import SmartHandle from './SmartHandle';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
 import { Trash2 } from 'lucide-react';
+import UngroupButton from './UngroupButton';
 
 export default function StickyNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
   const { id: workspaceId } = useParams<{ id: string }>();
@@ -91,6 +93,7 @@ export default function StickyNode({ id, data, selected }: { id: string, data: a
             className="bg-transparent font-semibold text-sm border-none outline-none focus:ring-0 w-full placeholder:text-black/50"
             placeholder="Untitled"
           />
+          <UngroupButton className="text-black/50 hover:text-black hover:bg-black/10" />
           <button 
             onClick={handleDelete}
             className="ml-auto text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-black/10 transition-colors"
@@ -129,7 +132,7 @@ export default function StickyNode({ id, data, selected }: { id: string, data: a
           />
         </div>
 
-        <Handle type="source" position={Position.Right} className="!bg-black !w-3 !h-3 !border-2 !border-white" />
+        <SmartHandle type="source" position={Position.Right} className="!bg-black !w-3 !h-3 !border-2 !border-white" />
       </div>
     </>
   );

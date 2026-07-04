@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
-import { Camera, Trash2, FileText } from 'lucide-react';
+import SmartHandle from './SmartHandle';
+import { Camera, Trash2, FileText, Loader2, AlertCircle } from 'lucide-react';
+import UngroupButton from './UngroupButton';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -95,6 +97,8 @@ export default function InstagramNode({ id, data, selected }: { id: string, data
               <FileText className="w-3.5 h-3.5" />
               <span>Transcript</span>
             </button>
+            
+            <UngroupButton />
 
             <button
               onClick={handleDelete}
@@ -108,6 +112,19 @@ export default function InstagramNode({ id, data, selected }: { id: string, data
 
         {/* Content Area */}
         <div className="flex-1 w-full bg-black relative min-h-0">
+          {data.status === 'processing' && (
+            <div className="absolute inset-0 z-20 bg-black/50 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-8 h-8 text-pink-500 animate-spin" />
+              <span className="text-sm font-medium text-white shadow-black drop-shadow-md">Processing Transcript...</span>
+            </div>
+          )}
+          {data.status === 'error' && (
+            <div className="absolute inset-0 z-20 bg-red-950/90 flex flex-col items-center justify-center gap-2 p-4 text-center">
+              <AlertCircle className="w-8 h-8 text-red-500" />
+              <span className="text-sm font-medium text-red-200 line-clamp-3">{data.content || 'Extraction failed'}</span>
+            </div>
+          )}
+
           {showTranscript ? (
             <div
               className="absolute inset-0 p-4 overflow-y-auto text-xs text-gray-300 bg-[#0f0f12] select-text nowheel custom-scrollbar"
@@ -156,7 +173,7 @@ export default function InstagramNode({ id, data, selected }: { id: string, data
           </p>
         </div>
 
-        <Handle type="source" position={Position.Right} className="!bg-pink-500 !w-3 !h-3 !border-2 !border-black" />
+        <SmartHandle type="source" position={Position.Right} className="!bg-pink-500 !w-3 !h-3 !border-2 !border-black" />
       </div>
     </>
   );

@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
-import { Camera, Trash2, ChevronLeft, ChevronRight, ScanText, Images } from 'lucide-react';
+import SmartHandle from './SmartHandle';
+import { Camera, Trash2, ChevronLeft, ChevronRight, ScanText, Loader2, AlertCircle, Images } from 'lucide-react';
+import UngroupButton from './UngroupButton';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -127,6 +129,8 @@ export default function CarouselNode({ id, data, selected }: { id: string; data:
                 <span>OCR</span>
               </button>
             )}
+            {/* Ungroup */}
+            <UngroupButton />
 
             {/* Delete */}
             <button
@@ -141,6 +145,19 @@ export default function CarouselNode({ id, data, selected }: { id: string; data:
 
         {/* ── Slide Area ── */}
         <div className="flex-1 w-full bg-black relative min-h-0 group">
+          {data.status === 'processing' && (
+            <div className="absolute inset-0 z-30 bg-black/50 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-8 h-8 text-pink-500 animate-spin" />
+              <span className="text-sm font-medium text-white shadow-black drop-shadow-md">Processing Slides...</span>
+            </div>
+          )}
+          {data.status === 'error' && (
+            <div className="absolute inset-0 z-30 bg-red-950/90 flex flex-col items-center justify-center gap-2 p-4 text-center">
+              <AlertCircle className="w-8 h-8 text-red-500" />
+              <span className="text-sm font-medium text-red-200 line-clamp-3">{data.content || 'Extraction failed'}</span>
+            </div>
+          )}
+
           {showCaption ? (
             // OCR Text view — scrollable, per-slide blocks
             <div
@@ -294,7 +311,7 @@ export default function CarouselNode({ id, data, selected }: { id: string; data:
         </div>
 
         {/* Output handle only — carousels connect to chat boxes, not other assets */}
-        <Handle type="source" position={Position.Right} className="!bg-pink-500 !w-3 !h-3 !border-2 !border-black" />
+        <SmartHandle type="source" position={Position.Right} className="!bg-pink-500 !w-3 !h-3 !border-2 !border-black" />
       </div>
     </>
   );

@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
+import SmartHandle from './SmartHandle';
 import { Video, Trash2, AlignLeft, Play } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
@@ -158,7 +159,7 @@ export default function ZoomNode({ id, data, selected }: { id: string; data: any
         </div>
 
         {/* Output handle */}
-        <Handle type="source" position={Position.Right} className="!bg-blue-500 !w-3 !h-3 !border-2 !border-black" />
+        <SmartHandle type="source" position={Position.Right} className="!bg-blue-500 !w-3 !h-3 !border-2 !border-black" />
       </div>
     </>
   );

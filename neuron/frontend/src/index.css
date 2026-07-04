@@ -49,3 +49,8 @@ body {
   50% { transform: scaleY(1); }
   100% { transform: scaleY(0.3); }
 }
+
+/* Hide the blue dotted selection box that appears when multiple nodes are selected */
+.react-flow__nodesselection-rect {
+  display: none !important;
+}
