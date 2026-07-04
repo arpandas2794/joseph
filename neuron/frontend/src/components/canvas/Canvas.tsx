@@ -22,8 +22,9 @@ import AnnotationNode from './AnnotationNode';
 import VoiceNode from './VoiceNode';
 import DriveNode from './DriveNode';
 import LoomNode from './LoomNode';
+import DocumentNode from './DocumentNode';
 import DottedDeleteEdge from './DottedDeleteEdge';
-import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive, Video, Layers } from 'lucide-react';
+import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive, Video, Layers, FileText } from 'lucide-react';
 import { workspaceApi } from '../../lib/api';
 import { layoutGroupChildren } from '../../utils/gridLayout';
 
@@ -106,6 +107,7 @@ const nodeTypes = {
   voice: VoiceNode,
   google_drive: DriveNode,
   loom: LoomNode,
+  document: DocumentNode,
 };
 
 const edgeTypes = {
@@ -140,6 +142,23 @@ export default function Canvas({ workspaceId }: CanvasProps) {
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
   const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handleAddDocument = async () => {
+    const nodeId = `document-${Date.now()}`;
+    const newNode = {
+      id: nodeId,
+      type: 'document',
+      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      data: { content: '<h1>Untitled Document</h1><p>Start writing here...</p>' },
+    };
+    addNode(newNode);
+    try {
+      await workspaceApi.upsertCard(workspaceId, newNode);
+      useCanvasStore.getState().setLastSaved(new Date());
+    } catch (err) {
+      console.error('Failed to create document node in DB', err);
+    }
+  };
 
   const openPlatformModal = (platform: Platform) => {
     setActivePlatform(platform);
@@ -827,6 +846,19 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
               </button>
               <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
                 Sticky Note
+              </span>
+            </div>
+
+            {/* Rich Text Document */}
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={handleAddDocument}
+                className="p-2.5 hover:bg-emerald-500/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-emerald-400"
+              >
+                <FileText className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                Rich Text
               </span>
             </div>
 
