@@ -309,18 +309,67 @@ router.post('/extract', async (req: Request, res: Response) => {
 
     // 1. YouTube & Loom Extraction
     if (isYoutube || isLoom) {
-      const metaStdout = await runYtdlpWithCookies('--dump-json --no-playlist', url);
-      const metadata = JSON.parse(metaStdout);
-      const videoId = metadata.id || 'unknown';
-      const title = metadata.title || (isLoom ? 'Loom Video' : 'YouTube Video');
-      const channel = metadata.uploader || (isLoom ? 'Loom Creator' : 'YouTube Channel');
-      const thumbnail = metadata.thumbnail || '';
+      let title = isLoom ? 'Loom Video' : 'YouTube Video';
+      let channel = isLoom ? 'Loom Creator' : 'YouTube Channel';
+      let thumbnail = '';
+      let videoId = 'unknown';
 
+      // Use oEmbed for highly reliable metadata (bypasses Render/AWS IP blocks)
+      if (isYoutube) {
+        try {
+          const oembedRes = await axios.get(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+          if (oembedRes.data) {
+            title = oembedRes.data.title || title;
+            channel = oembedRes.data.author_name || channel;
+            thumbnail = oembedRes.data.thumbnail_url || '';
+            const vMatch = url.match(/[?&]v=([^&#]*)/);
+            const shortMatch = url.match(/youtu\.be\/([^&#]*)/);
+            videoId = (vMatch && vMatch[1]) || (shortMatch && shortMatch[1]) || videoId;
+          }
+        } catch (err: any) {
+          console.warn('oEmbed metadata fetch failed:', err.message);
+        }
+      } else {
+        // Fallback for Loom metadata
+        try {
+          const metaStdout = await runYtdlpWithCookies('--dump-json --no-playlist', url);
+          const metadata = JSON.parse(metaStdout);
+          videoId = metadata.id || videoId;
+          title = metadata.title || title;
+          channel = metadata.uploader || channel;
+          thumbnail = metadata.thumbnail || '';
+        } catch (err: any) {
+          console.warn('Loom metadata fetch failed:', err.message);
+        }
+      }
+
+      // Audio Extraction & Transcription (Try Groq first, fallback to closed captions)
+      let transcriptText = '';
       const prefix = isLoom ? 'loom' : 'yt';
       const tempAudioPath = path.join(TEMP_DIR, `${prefix}-${Date.now()}.mp3`);
-      await runYtdlpWithCookies(`-x --audio-format mp3 -o "${tempAudioPath}"`, url);
-
-      const transcriptText = await transcribeAudioWithGroq(tempAudioPath);
+      
+      try {
+        await runYtdlpWithCookies(`-x --audio-format mp3 -o "${tempAudioPath}"`, url);
+        transcriptText = await transcribeAudioWithGroq(tempAudioPath);
+      } catch (err: any) {
+        console.warn(`yt-dlp audio extraction failed (likely IP block on Render):`, err.message);
+        
+        // If Groq/yt-dlp fails, gracefully fallback to YouTube closed captions!
+        if (isYoutube) {
+          try {
+            // Lazy load youtube-transcript so we don't break if it wasn't imported at the top
+            const { YoutubeTranscript } = require('youtube-transcript');
+            const transcriptItems = await YoutubeTranscript.fetchTranscript(url);
+            transcriptText = transcriptItems.map((item: any) => item.text).join(' ');
+            console.log('Successfully fell back to YouTube closed captions.');
+          } catch (fallbackErr: any) {
+            console.warn('Fallback closed captions also failed:', fallbackErr.message);
+            transcriptText = '[No audio extracted, and no closed captions available]';
+          }
+        } else {
+          transcriptText = '[Audio extraction failed]';
+        }
+      }
 
       // Clean up temp file
       if (fs.existsSync(tempAudioPath)) {
