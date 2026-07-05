@@ -4,12 +4,21 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import os from 'os';
 
 const router = Router();
-const upload = multer({ dest: '/tmp/voice-uploads/' });
-
-const TEMP_DIR = '/tmp/voice-uploads';
+const TEMP_DIR = path.join(os.tmpdir(), 'voice-uploads');
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: TEMP_DIR,
+  filename: (req, file, cb) => {
+    const uniqueSuffix = crypto.randomUUID();
+    const ext = path.extname(file.originalname) || '.webm';
+    cb(null, `${uniqueSuffix}${ext}`);
+  }
+});
+const upload = multer({ storage });
 
 router.post('/transcribe-voice', upload.single('audio'), async (req: Request, res: Response) => {
   const file = req.file;

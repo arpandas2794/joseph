@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import extractorRoutes from './routes/extractor';
 import voiceRoutes from './routes/voice';
+import chatRoutes from './routes/chat';
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 // Routes
 app.use('/api', extractorRoutes);
 app.use('/api', voiceRoutes);
+app.use('/api', chatRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });

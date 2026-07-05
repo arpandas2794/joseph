@@ -85,7 +85,7 @@ export default function WorkspacePage() {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#09090b] text-white flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[#121214] text-white flex flex-col overflow-hidden">
       {/* Top Navbar */}
       <header className="h-14 border-b border-white/10 bg-black/50 backdrop-blur-xl flex items-center justify-between px-4 z-50">
         <div className="flex items-center gap-4">

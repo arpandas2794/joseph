@@ -119,7 +119,12 @@ export default function DocumentNode({ id, data, selected }: { id: string, data:
           <div className="flex items-center gap-2">
             <UngroupButton />
             <button
-              onClick={handleDelete}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete();
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               className="text-red-500 hover:text-red-400 p-1 rounded-md hover:bg-white/5 transition-colors"
               title="Delete Document"
             >
@@ -132,7 +137,7 @@ export default function DocumentNode({ id, data, selected }: { id: string, data:
         <div className="flex-1 w-full bg-white flex flex-col min-h-0 relative">
           
           {/* Pinned Toolbar */}
-          <div className="flex items-center gap-1 p-2 border-b border-gray-100 bg-gray-50/50">
+          <div className="flex items-center gap-1 p-2 border-b border-gray-100 bg-gray-50/50 nodrag">
           <div className="flex items-center gap-1 pr-2 border-r border-gray-200">
             <button
               onClick={() => editor.chain().focus().toggleBold().run()}

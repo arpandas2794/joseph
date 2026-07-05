@@ -75,6 +75,8 @@ export const workspaceApi = {
   },
 
   async deleteCard(cardId: string) {
+    // Delete associated connections first (as source or target)
+    await supabase.from('connections').delete().or(`source_id.eq.${cardId},target_chat_id.eq.${cardId}`);
     const { error } = await supabase.from('cards').delete().eq('id', cardId);
     if (error) throw error;
   },
@@ -145,5 +147,125 @@ export const workspaceApi = {
     }
 
     return response.json();
+  },
+
+  async getConversations(chatCardId: string) {
+    const { data, error } = await supabase
+      .from('ai_conversations')
+      .select('*')
+      .eq('chat_card_id', chatCardId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async createConversation(chatCardId: string) {
+    const { data, error } = await supabase
+      .from('ai_conversations')
+      .insert({ chat_card_id: chatCardId })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async getMessages(conversationId: string) {
+    const { data, error } = await supabase
+      .from('ai_messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async sendMessage(conversationId: string, chatCardId: string, message: string, model: string) {
+    const response = await fetch('http://localhost:3001/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ conversationId, chatCardId, message, model })
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to send message');
+    }
+    return response.json();
+  },
+
+  async branchConversation(conversationId: string, targetMessageId: string, targetChatCardId: string, originalTitle?: string) {
+    const response = await fetch('http://localhost:3001/api/chat/branch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ conversationId, targetMessageId, targetChatCardId, originalTitle })
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to branch conversation');
+    }
+    return response.json();
+  },
+
+  async createBranch(conversationId: string, parentMessageId: string, name?: string) {
+    const response = await fetch('http://localhost:3001/api/branch/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId, parentMessageId, name })
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to create branch');
+    }
+    return response.json();
+  },
+
+  async switchBranch(conversationId: string, branchId: string) {
+    const response = await fetch('http://localhost:3001/api/branch/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId, branchId })
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to switch branch');
+    }
+    return response.json();
+  },
+
+  async deleteConversation(conversationId: string) {
+    const { error } = await supabase
+      .from('ai_conversations')
+      .delete()
+      .eq('id', conversationId);
+    if (error) throw error;
+  },
+
+  async renameConversation(conversationId: string, newTitle: string) {
+    const response = await fetch(`http://localhost:3001/api/chat/${conversationId}/title`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ title: newTitle })
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to rename conversation');
+    }
+    return response.json();
+  },
+
+  async getFirstMessage(conversationId: string) {
+    const { data, error } = await supabase
+      .from('ai_messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (error) throw error;
+    return data && data.length > 0 ? data[0] : null;
   }
 };

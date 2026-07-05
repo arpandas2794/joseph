@@ -9,6 +9,7 @@ import {
   SelectionMode,
   BackgroundVariant,
 } from '@xyflow/react';
+import type { EdgeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCanvasStore } from '../../store/canvasStore';
 import StickyNode from './StickyNode';
@@ -23,8 +24,9 @@ import VoiceNode from './VoiceNode';
 import DriveNode from './DriveNode';
 import LoomNode from './LoomNode';
 import DocumentNode from './DocumentNode';
+import ChatNode from './ChatNode';
 import DottedDeleteEdge from './DottedDeleteEdge';
-import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive, Video, Layers, FileText } from 'lucide-react';
+import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive, Video, Layers, FileText, MessageSquare } from 'lucide-react';
 import { workspaceApi } from '../../lib/api';
 import { layoutGroupChildren } from '../../utils/gridLayout';
 
@@ -108,6 +110,7 @@ const nodeTypes = {
   google_drive: DriveNode,
   loom: LoomNode,
   document: DocumentNode,
+  ai_chat: ChatNode,
 };
 
 const edgeTypes = {
@@ -144,7 +147,7 @@ export default function Canvas({ workspaceId }: CanvasProps) {
   const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
   const handleAddDocument = async () => {
-    const nodeId = `document-${Date.now()}`;
+    const nodeId = crypto.randomUUID();
     const newNode = {
       id: nodeId,
       type: 'document',
@@ -157,6 +160,24 @@ export default function Canvas({ workspaceId }: CanvasProps) {
       useCanvasStore.getState().setLastSaved(new Date());
     } catch (err) {
       console.error('Failed to create document node in DB', err);
+    }
+  };
+
+  const handleAddChat = async () => {
+    const nodeId = crypto.randomUUID();
+    const newNode = {
+      id: nodeId,
+      type: 'ai_chat',
+      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      style: { width: 640, height: 520 },
+      data: { title: 'AI Assistant', content: '' },
+    };
+    addNode(newNode);
+    try {
+      await workspaceApi.upsertCard(workspaceId, newNode);
+      useCanvasStore.getState().setLastSaved(new Date());
+    } catch (err) {
+      console.error('Failed to create chat node in DB', err);
     }
   };
 
@@ -194,6 +215,17 @@ export default function Canvas({ workspaceId }: CanvasProps) {
       setEdges(initialEdges);
     }).catch(console.error);
   }, [workspaceId, setNodes, setEdges]);
+
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    onEdgesChange(changes);
+    changes.forEach((change) => {
+      if (change.type === 'remove') {
+        workspaceApi.deleteEdge(change.id).catch((err) => {
+          console.error('Failed to delete edge in DB on edge change:', err);
+        });
+      }
+    });
+  }, [onEdgesChange]);
 
   const handleToggleGroupMode = () => {
     setIsGroupingMode(true);
@@ -478,12 +510,15 @@ export default function Canvas({ workspaceId }: CanvasProps) {
 
     setEdges([...edges, newEdge]);
 
+    const sourceNode = nodes.find(n => n.id === connection.source);
+    const sourceType = sourceNode?.type === 'group' ? 'group' : 'card';
+
     try {
       await workspaceApi.createEdge(workspaceId, {
         id: edgeId,
         source_id: connection.source,
         target_id: connection.target,
-        source_type: 'card'
+        source_type: sourceType
       });
       useCanvasStore.getState().setLastSaved(new Date());
     } catch (err) {
@@ -771,12 +806,12 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
   }, [nodes]);
 
   return (
-    <div className="w-full h-full bg-black/40">
+    <div className="w-full h-full bg-[#121214]">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
         isValidConnection={isValidConnection}
         onNodeDragStop={onNodeDragStop}
@@ -792,9 +827,10 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
         onSelectionEnd={onSelectionEnd}
         panOnScroll={true}
         className="touch-none"
+        proOptions={{ hideAttribution: true }}
       >
         <div className="absolute inset-0 pointer-events-none">
-          <Background color="#3f3f46" variant={BackgroundVariant.Dots} gap={20} size={1.5} />
+          <Background color="rgba(255, 255, 255, 0.15)" variant={BackgroundVariant.Dots} gap={20} size={1.5} />
         </div>
         <Controls 
           className="!bg-[#18181b]/80 backdrop-blur-xl !border-white/5 !rounded-2xl !shadow-2xl overflow-hidden [&>button]:!bg-transparent [&>button]:!border-b-white/5 [&>button:last-child]:!border-b-0 hover:[&>button]:!bg-white/10 [&>button>svg]:!fill-gray-400 hover:[&>button>svg]:!fill-white transition-all" 
@@ -809,10 +845,11 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
             if (n.type === 'instagram_carousel') return '#c026d3';
             if (n.type === 'website') return '#6366f1';
             if (n.type === 'loom') return '#625DF5';
+            if (n.type === 'ai_chat') return '#818cf8';
             return '#3f3f46';
           }}
-          className="!bg-[#18181b]/90 !border-white/5 !rounded-2xl !shadow-2xl overflow-hidden backdrop-blur-xl"
-          maskColor="rgba(0,0,0,0.6)"
+          className="!bg-[#0a0a0c]/95 !border !border-white/10 hover:!border-indigo-500/30 !rounded-2xl !shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl transition-all duration-300"
+          maskColor="rgba(0,0,0,0.75)"
           nodeBorderRadius={6}
           nodeStrokeWidth={0}
         />
@@ -859,6 +896,19 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
               </button>
               <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
                 Rich Text
+              </span>
+            </div>
+
+            {/* AI Assistant Chat Box */}
+            <div className="relative group flex items-center justify-center">
+              <button
+                onClick={handleAddChat}
+                className="p-2.5 hover:bg-indigo-500/10 rounded-xl transition-all hover:scale-105 active:scale-95 text-indigo-400"
+              >
+                <MessageSquare className="w-5 h-5" />
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                AI Assistant
               </span>
             </div>
 
