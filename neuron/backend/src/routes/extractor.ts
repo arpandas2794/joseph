@@ -354,16 +354,26 @@ router.post('/extract', async (req: Request, res: Response) => {
       } catch (err: any) {
         console.warn(`yt-dlp audio extraction failed (likely IP block on Render):`, err.message);
         
-        // If Groq/yt-dlp fails, gracefully fallback to YouTube closed captions!
-        if (isYoutube) {
+        if (isYoutube && (!transcriptText || transcriptText.trim() === '')) {
           try {
-            // Lazy load youtube-transcript so we don't break if it wasn't imported at the top
-            const { YoutubeTranscript } = require('youtube-transcript');
-            const transcriptItems = await YoutubeTranscript.fetchTranscript(url);
-            transcriptText = transcriptItems.map((item: any) => item.text).join(' ');
-            console.log('Successfully fell back to YouTube closed captions.');
-          } catch (fallbackErr: any) {
-            console.warn('Fallback closed captions also failed:', fallbackErr.message);
+            console.log('Attempting Apify YouTube Transcript Actor as final fallback...');
+            const { ApifyClient } = require('apify-client');
+            if (process.env.APIFY_TOKEN) {
+              const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
+              const run = await client.actor('foudhil/actor-youtube-transcript').call({ videoUrls: [url] });
+              const { items } = await client.dataset(run.defaultDatasetId).listItems();
+              if (items && items.length > 0 && items[0].transcript) {
+                transcriptText = items[0].transcript;
+                console.log('Successfully fell back to Apify YouTube Transcript actor.');
+              }
+            } else {
+              console.log('No APIFY_TOKEN found for transcript fallback.');
+            }
+          } catch (apifyErr: any) {
+            console.warn('Apify YouTube Transcript fallback also failed:', apifyErr.message);
+          }
+          
+          if (!transcriptText || transcriptText.trim() === '') {
             transcriptText = '[No audio extracted, and no closed captions available]';
           }
         } else {
