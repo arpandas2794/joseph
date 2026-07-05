@@ -8,6 +8,7 @@ import {
   MarkerType,
   SelectionMode,
   BackgroundVariant,
+  useReactFlow,
 } from '@xyflow/react';
 import type { EdgeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -129,6 +130,7 @@ interface CanvasProps {
 
 export default function Canvas({ workspaceId }: CanvasProps) {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, setNodes, setEdges } = useCanvasStore();
+  const { setCenter, getZoom } = useReactFlow();
   const [showLinkModal, setShowLinkModal] = React.useState(false);
   const [activePlatform, setActivePlatform] = React.useState<Platform>('youtube');
   const [linkUrl, setLinkUrl] = React.useState('');
@@ -237,7 +239,7 @@ export default function Canvas({ workspaceId }: CanvasProps) {
     
     const state = useCanvasStore.getState();
     const currentNodes = state.nodes;
-    const selectedNodes = currentNodes.filter(n => n.selected && n.type !== 'group' && n.type !== 'annotation' && !n.parentId);
+    const selectedNodes = currentNodes.filter(n => n.selected && n.type !== 'group' && n.type !== 'annotation' && n.type !== 'ai_chat' && !n.parentId);
     
     if (selectedNodes.length === 0) {
       setIsGroupingMode(false);
@@ -651,7 +653,7 @@ export default function Canvas({ workspaceId }: CanvasProps) {
         let updatedNode = { ...node };
 
         // Handle dropping into/out of groups
-        if (updatedNode.type !== 'group' && updatedNode.type !== 'annotation') {
+        if (updatedNode.type !== 'group' && updatedNode.type !== 'annotation' && updatedNode.type !== 'ai_chat') {
           let skipGroupLogic = false;
           if (updatedNode.parentId) {
             const parentNode = currentNodes.find(n => n.id === updatedNode.parentId);
@@ -798,7 +800,7 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
     }
 
     // Group nodes should only connect to Chat nodes
-    if (sourceNode?.type === 'group' && targetNode?.type !== 'chat') {
+    if (sourceNode?.type === 'group' && targetNode?.type !== 'ai_chat') {
       return false;
     }
 
@@ -852,6 +854,11 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
           maskColor="rgba(0,0,0,0.75)"
           nodeBorderRadius={6}
           nodeStrokeWidth={0}
+          onNodeClick={(_event, node) => {
+            const x = (node.position?.x ?? 0) + ((node.width ?? 200) / 2);
+            const y = (node.position?.y ?? 0) + ((node.height ?? 150) / 2);
+            setCenter(x, y, { zoom: Math.max(getZoom(), 0.75), duration: 600 });
+          }}
         />
 
         <Panel position="bottom-center" className="mb-6">
