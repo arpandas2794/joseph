@@ -9,6 +9,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
+import { YoutubeTranscript } from 'youtube-transcript';
 
 const execAsync = promisify(exec);
 const router = Router();
@@ -440,21 +441,14 @@ router.post('/extract', upload.single('audioFile'), async (req: Request, res: Re
 
         if (isYoutube && (!transcriptText || transcriptText.trim() === '')) {
           try {
-            console.log('Attempting Apify YouTube Transcript Actor as final fallback...');
-            const { ApifyClient } = require('apify-client');
-            if (process.env.APIFY_TOKEN) {
-              const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
-              const run = await client.actor('foudhil/actor-youtube-transcript').call({ videoUrls: [url] });
-              const { items } = await client.dataset(run.defaultDatasetId).listItems();
-              if (items && items.length > 0 && items[0].transcript) {
-                transcriptText = items[0].transcript;
-                console.log('Successfully fell back to Apify YouTube Transcript actor.');
-              }
-            } else {
-              console.log('No APIFY_TOKEN found for transcript fallback.');
+            console.log('Attempting native youtube-transcript package as final fallback...');
+            const transcriptItems = await YoutubeTranscript.fetchTranscript(url);
+            if (transcriptItems && transcriptItems.length > 0) {
+              transcriptText = transcriptItems.map((item: any) => item.text).join(' ');
+              console.log('Successfully fell back to native youtube-transcript.');
             }
-          } catch (apifyErr: any) {
-            console.warn('Apify YouTube Transcript fallback also failed:', apifyErr.message);
+          } catch (ytErr: any) {
+            console.warn('Native youtube-transcript fallback also failed:', ytErr.message);
           }
           
           if (!transcriptText || transcriptText.trim() === '') {
