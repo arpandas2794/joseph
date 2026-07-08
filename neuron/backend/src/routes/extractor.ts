@@ -254,6 +254,43 @@ async function extractWebsiteMetadata(url: string): Promise<any> {
   }
 }
 
+async function fetchCobaltAudioUrl(url: string): Promise<string | null> {
+  const primaryApi = 'https://rue-cobalt.xenon.zone';
+  const postData = { url, downloadMode: 'audio', audioFormat: 'mp3' };
+  const headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  };
+
+  try {
+    const res = await axios.post(primaryApi, postData, { headers, timeout: 10000 });
+    if (res.data && res.data.url) return res.data.url;
+  } catch (err: any) {
+    console.warn(`Primary Cobalt API failed:`, err.message);
+  }
+
+  // Fallback: fetch working instances from cobalt.directory
+  try {
+    const dirRes = await axios.get('https://cobalt.directory/api/working?type=api', { timeout: 10000 });
+    const apis = dirRes.data?.data?.youtube;
+    if (apis && Array.isArray(apis)) {
+      for (const api of apis) {
+        if (api === primaryApi) continue;
+        try {
+          const res = await axios.post(api, postData, { headers, timeout: 10000 });
+          if (res.data && res.data.url) return res.data.url;
+        } catch (e: any) {
+          console.warn(`Fallback Cobalt API ${api} failed:`, e.message);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('Failed to fetch Cobalt directory:', err.message);
+  }
+  return null;
+}
+
 router.post('/extract', async (req: Request, res: Response) => {
   const { url } = req.body;
 
@@ -354,6 +391,30 @@ router.post('/extract', async (req: Request, res: Response) => {
       } catch (err: any) {
         console.warn(`yt-dlp audio extraction failed (likely IP block on Render):`, err.message);
         
+        if (isYoutube) {
+          console.log('Attempting Cobalt Downloader API as a direct audio fallback...');
+          try {
+            const cobaltUrl = await fetchCobaltAudioUrl(url);
+            if (cobaltUrl) {
+              console.log('Successfully got direct audio stream from Cobalt, downloading...');
+              const response = await axios({
+                method: 'GET',
+                url: cobaltUrl,
+                responseType: 'stream'
+              });
+              const writer = fs.createWriteStream(tempAudioPath);
+              response.data.pipe(writer);
+              await new Promise((resolve, reject) => {
+                writer.on('finish', resolve);
+                writer.on('error', reject);
+              });
+              transcriptText = await transcribeAudioWithGroq(tempAudioPath);
+            }
+          } catch (cobaltErr: any) {
+            console.warn('Cobalt audio fallback failed:', cobaltErr.message);
+          }
+        }
+
         if (isYoutube && (!transcriptText || transcriptText.trim() === '')) {
           try {
             console.log('Attempting Apify YouTube Transcript Actor as final fallback...');
@@ -376,7 +437,7 @@ router.post('/extract', async (req: Request, res: Response) => {
           if (!transcriptText || transcriptText.trim() === '') {
             transcriptText = '[No audio extracted, and no closed captions available]';
           }
-        } else {
+        } else if (!isYoutube && (!transcriptText || transcriptText.trim() === '')) {
           transcriptText = '[Audio extraction failed]';
         }
       }
