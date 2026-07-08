@@ -20,8 +20,12 @@ if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
-// Path to yt-dlp binary (downloaded by scripts/install-yt-dlp.js postinstall)
-const YTDLP_PATH = path.join(__dirname, '../../bin/yt-dlp');
+// Pick the right yt-dlp binary for the current platform
+// bin/yt-dlp       = macOS standalone (committed)
+// bin/yt-dlp-linux = Linux standalone (committed, used on Render)
+const YTDLP_PATH = process.platform === 'linux'
+  ? path.join(__dirname, '../../bin/yt-dlp-linux')
+  : path.join(__dirname, '../../bin/yt-dlp');
 
 async function runYtdlpWithCookies(args: string, url: string): Promise<string> {
   const localCookiesPath = path.join(__dirname, '../../cookies.txt');
