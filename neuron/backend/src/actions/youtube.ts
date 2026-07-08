@@ -51,7 +51,7 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
     const tempDir = os.tmpdir();
     const outputTemplate = path.join(tempDir, `${tempId}.%(ext)s`);
     const binaryName = process.platform === 'darwin' ? 'yt-dlp' : 'yt-dlp-linux';
-    const binaryPath = path.join(process.cwd(), 'bin', binaryName);
+    const binaryPath = path.join(__dirname, '../../bin', binaryName);
 
     // Method 1: Try youtube-transcript (Fastest and Most Reliable)
     try {
@@ -153,7 +153,7 @@ export async function getYouTubeMetadata(url: string): Promise<{ title: string; 
     // 1. Try yt-dlp (Robust but Slower)
     try {
         const binaryName = process.platform === 'darwin' ? 'yt-dlp' : 'yt-dlp-linux';
-        const binaryPath = path.join(process.cwd(), 'bin', binaryName);
+        const binaryPath = path.join(__dirname, '../../bin', binaryName);
         const envCookiesPath = process.env.YT_DLP_COOKIES_PATH || path.join(process.cwd(), 'cookies.txt');
         const cookiesPath = (await fs.stat(envCookiesPath).catch(() => null)) ? envCookiesPath : null;
         
