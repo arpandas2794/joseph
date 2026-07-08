@@ -331,8 +331,12 @@ async function fetchCobaltAudioUrl(url: string): Promise<string | null> {
   return null;
 }
 
-const upload = multer({ 
-  dest: TEMP_DIR,
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, TEMP_DIR),
+    // Force .mp3 extension so Groq can detect the audio format
+    filename: (_req, _file, cb) => cb(null, `upload-${Date.now()}.mp3`),
+  }),
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit for audio uploads
 });
 
