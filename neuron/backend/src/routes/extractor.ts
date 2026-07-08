@@ -427,8 +427,14 @@ router.post('/extract', upload.single('audioFile'), async (req: Request, res: Re
           console.log(`Received frontend-downloaded audio file: ${req.file.path}`);
           transcriptText = await transcribeAudioWithGroq(tempAudioPath);
         } else {
-          // Use android,ios client spoofing to heavily reduce 429 Too Many Requests blocks on Datacenter IPs
-          await runYtdlpWithCookies(`-x --audio-format mp3 --extractor-args "youtube:player_client=android,ios,web" -o "${tempAudioPath}"`, url);
+          // If cookies exist, use tv/web (android/ios don't support cookies well)
+          // If no cookies exist, use android/ios to bypass Datacenter 429 Too Many Requests blocks
+          const hasCookies = fs.existsSync('/etc/secrets/cookies.txt') || fs.existsSync(path.join(__dirname, '../../cookies.txt'));
+          const clientArgs = hasCookies 
+            ? '--extractor-args "youtube:player_client=tv,web"'
+            : '--extractor-args "youtube:player_client=android,ios,tv,web"';
+
+          await runYtdlpWithCookies(`-x --audio-format mp3 ${clientArgs} -o "${tempAudioPath}"`, url);
           transcriptText = await transcribeAudioWithGroq(tempAudioPath);
         }
       } catch (err: any) {
