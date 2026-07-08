@@ -255,7 +255,15 @@ async function extractWebsiteMetadata(url: string): Promise<any> {
 }
 
 async function fetchCobaltAudioUrl(url: string): Promise<string | null> {
-  const primaryApi = 'https://rue-cobalt.xenon.zone';
+  // Hardcoded list of active instances to avoid cobalt.directory 403 blocks on Render
+  const apis = [
+    "https://api-cobalt.eversiege.network",
+    "https://cobaltapi.squair.xyz",
+    "https://api.qwkuns.me",
+    "https://nuko-c.meowing.de",
+    "https://lime.clxxped.lol",
+    "https://rue-cobalt.xenon.zone"
+  ];
   const postData = { url, downloadMode: 'audio', audioFormat: 'mp3' };
   const headers = {
     'Accept': 'application/json',
@@ -263,20 +271,23 @@ async function fetchCobaltAudioUrl(url: string): Promise<string | null> {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   };
 
-  try {
-    const res = await axios.post(primaryApi, postData, { headers, timeout: 10000 });
-    if (res.data && res.data.url) return res.data.url;
-  } catch (err: any) {
-    console.warn(`Primary Cobalt API failed:`, err.message);
+  // 1. Try hardcoded instances first (some may not use Cloudflare and will allow Render IPs)
+  for (const api of apis) {
+    try {
+      const res = await axios.post(api, postData, { headers, timeout: 8000 });
+      if (res.data && res.data.url) return res.data.url;
+    } catch (err: any) {
+      console.warn(`Cobalt API ${api} failed:`, err.message);
+    }
   }
 
-  // Fallback: fetch working instances from cobalt.directory
+  // 2. Fallback: fetch working instances from cobalt.directory dynamically
   try {
     const dirRes = await axios.get('https://cobalt.directory/api/working?type=api', { timeout: 10000 });
-    const apis = dirRes.data?.data?.youtube;
-    if (apis && Array.isArray(apis)) {
-      for (const api of apis) {
-        if (api === primaryApi) continue;
+    const dirApis = dirRes.data?.data?.youtube;
+    if (dirApis && Array.isArray(dirApis)) {
+      for (const api of dirApis) {
+        if (apis.includes(api)) continue;
         try {
           const res = await axios.post(api, postData, { headers, timeout: 10000 });
           if (res.data && res.data.url) return res.data.url;
@@ -386,7 +397,8 @@ router.post('/extract', async (req: Request, res: Response) => {
       const tempAudioPath = path.join(TEMP_DIR, `${prefix}-${Date.now()}.mp3`);
       
       try {
-        await runYtdlpWithCookies(`-x --audio-format mp3 -o "${tempAudioPath}"`, url);
+        // Use android,ios client spoofing to heavily reduce 429 Too Many Requests blocks on Datacenter IPs
+        await runYtdlpWithCookies(`-x --audio-format mp3 --extractor-args "youtube:player_client=android,ios,web" -o "${tempAudioPath}"`, url);
         transcriptText = await transcribeAudioWithGroq(tempAudioPath);
       } catch (err: any) {
         console.warn(`yt-dlp audio extraction failed (likely IP block on Render):`, err.message);
