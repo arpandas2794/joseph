@@ -108,9 +108,9 @@ export async function extractYouTubeTranscript(url: string): Promise<string> {
     try {
       const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
       const run = await client.actor('foudhil/actor-youtube-transcript').call({ videoUrls: [url] });
-      const { items } = await client.dataset(run.defaultDatasetId).listItems();
-      if (items && items.length > 0 && items[0].transcript) {
-        transcriptText = items[0].transcript;
+      const { items } = await client.dataset(run.defaultDatasetId as string).listItems();
+      if (items && items.length > 0 && (items[0] as any).transcript) {
+        transcriptText = (items[0] as any).transcript;
       }
     } catch (apifyErr) {
       console.warn('Apify failed.');
