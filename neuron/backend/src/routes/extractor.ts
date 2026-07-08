@@ -428,11 +428,12 @@ router.post('/extract', upload.single('audioFile'), async (req: Request, res: Re
           transcriptText = await transcribeAudioWithGroq(tempAudioPath);
         } else {
           // If cookies exist, use tv/web (android/ios don't support cookies well)
-          // If no cookies exist, use android/ios to bypass Datacenter 429 Too Many Requests blocks
+          // If no cookies exist, use android/ios to bypass Datacenter 429 blocks
+          // We ALSO add player_skip=webpage,configs,js to COMPLETELY bypass the HTTP 429 IP Ban on the main YouTube webpage endpoint!
           const hasCookies = fs.existsSync('/etc/secrets/cookies.txt') || fs.existsSync(path.join(__dirname, '../../cookies.txt'));
           const clientArgs = hasCookies 
-            ? '--extractor-args "youtube:player_client=tv,web"'
-            : '--extractor-args "youtube:player_client=android,ios,tv,web"';
+            ? '--extractor-args "youtube:player_client=tv,web;player_skip=webpage,configs,js"'
+            : '--extractor-args "youtube:player_client=android,ios,tv,web;player_skip=webpage,configs,js"';
 
           await runYtdlpWithCookies(`-x --audio-format mp3 ${clientArgs} -o "${tempAudioPath}"`, url);
           transcriptText = await transcribeAudioWithGroq(tempAudioPath);
