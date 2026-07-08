@@ -99,13 +99,56 @@ export const workspaceApi = {
 
   async extractLink(url: string) {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    
+    const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
+    
+    let formData = new FormData();
+    formData.append('url', url);
+
+    if (isYoutube) {
+      try {
+        const apis = [
+          "https://api-cobalt.eversiege.network",
+          "https://cobaltapi.squair.xyz",
+          "https://api.qwkuns.me",
+          "https://nuko-c.meowing.de",
+          "https://lime.clxxped.lol",
+          "https://rue-cobalt.xenon.zone"
+        ];
+        
+        let audioBlob = null;
+        for (const api of apis) {
+          try {
+            const res = await fetch(api, {
+              method: 'POST',
+              headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url, downloadMode: 'audio', audioFormat: 'mp3' })
+            });
+            const data = await res.json();
+            if (data && data.url) {
+              const streamRes = await fetch(data.url);
+              if (streamRes.ok) {
+                audioBlob = await streamRes.blob();
+                break;
+              }
+            }
+          } catch (e) {
+            console.warn(`Cobalt API ${api} failed:`, e);
+          }
+        }
+        if (audioBlob) {
+          formData.append('audioFile', audioBlob, 'audio.mp3');
+        }
+      } catch (err) {
+        console.warn('Frontend Cobalt extraction failed:', err);
+      }
+    }
+
     const response = await fetch(`${API_URL}/api/extract`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ url })
+      body: formData // Let fetch automatically set the multipart/form-data boundary headers
     });
+    
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.error || 'Failed to extract link');

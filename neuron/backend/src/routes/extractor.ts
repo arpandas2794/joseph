@@ -8,6 +8,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import multer from 'multer';
 
 const execAsync = promisify(exec);
 const router = Router();
@@ -302,7 +303,12 @@ async function fetchCobaltAudioUrl(url: string): Promise<string | null> {
   return null;
 }
 
-router.post('/extract', async (req: Request, res: Response) => {
+const upload = multer({ 
+  dest: TEMP_DIR,
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit for audio uploads
+});
+
+router.post('/extract', upload.single('audioFile'), async (req: Request, res: Response) => {
   const { url } = req.body;
 
   if (!url) {
@@ -394,14 +400,19 @@ router.post('/extract', async (req: Request, res: Response) => {
       // Audio Extraction & Transcription (Try Groq first, fallback to closed captions)
       let transcriptText = '';
       const prefix = isLoom ? 'loom' : 'yt';
-      const tempAudioPath = path.join(TEMP_DIR, `${prefix}-${Date.now()}.mp3`);
+      const tempAudioPath = req.file ? req.file.path : path.join(TEMP_DIR, `${prefix}-${Date.now()}.mp3`);
       
       try {
-        // Use android,ios client spoofing to heavily reduce 429 Too Many Requests blocks on Datacenter IPs
-        await runYtdlpWithCookies(`-x --audio-format mp3 --extractor-args "youtube:player_client=android,ios,web" -o "${tempAudioPath}"`, url);
-        transcriptText = await transcribeAudioWithGroq(tempAudioPath);
+        if (req.file) {
+          console.log(`Received frontend-downloaded audio file: ${req.file.path}`);
+          transcriptText = await transcribeAudioWithGroq(tempAudioPath);
+        } else {
+          // Use android,ios client spoofing to heavily reduce 429 Too Many Requests blocks on Datacenter IPs
+          await runYtdlpWithCookies(`-x --audio-format mp3 --extractor-args "youtube:player_client=android,ios,web" -o "${tempAudioPath}"`, url);
+          transcriptText = await transcribeAudioWithGroq(tempAudioPath);
+        }
       } catch (err: any) {
-        console.warn(`yt-dlp audio extraction failed (likely IP block on Render):`, err.message);
+        console.warn(`Local audio extraction failed:`, err.message);
         
         if (isYoutube) {
           console.log('Attempting Cobalt Downloader API as a direct audio fallback...');
