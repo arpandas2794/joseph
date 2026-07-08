@@ -150,8 +150,12 @@ export const workspaceApi = {
             console.warn(`Cobalt API ${api} failed completely:`, e);
           }
         }
-        if (audioBlob) {
+        if (audioBlob && audioBlob.size > 1000) {
+          // Only send audio if we actually got a valid non-empty file (> 1KB)
           formData.append('audioFile', audioBlob, 'audio.mp3');
+          console.log(`Successfully captured audio blob: ${audioBlob.size} bytes`);
+        } else {
+          console.warn('Frontend audio capture failed or returned empty file — backend will use its own fallbacks.');
         }
       } catch (err) {
         console.warn('Frontend Cobalt extraction failed:', err);
