@@ -12,7 +12,16 @@ export const extractAudio = async (req: Request, res: Response) => {
 
         const transcriptText = await fetchYouTubeTranscript(url);
         
-        return res.json({ text: transcriptText || '[No audio extracted, and no closed captions available]' });
+        return res.json({
+            type: 'youtube',
+            content: transcriptText || '[No audio extracted, and no closed captions available]',
+            metadata: {
+                title: 'YouTube Video',
+                channel: 'YouTube Channel',
+                videoId: url,
+                thumbnail: ''
+            }
+        });
     } catch (e) {
         console.error(e);
         return res.status(500).json({ error: 'Failed to extract' });
