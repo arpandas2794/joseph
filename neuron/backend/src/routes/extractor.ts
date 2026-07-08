@@ -24,12 +24,16 @@ if (!fs.existsSync(TEMP_DIR)) {
 const YTDLP_PATH = path.join(__dirname, '../../bin/yt-dlp');
 
 async function runYtdlpWithCookies(args: string, url: string): Promise<string> {
-  const cookiesPath = path.join(__dirname, '../../cookies.txt');
+  const localCookiesPath = path.join(__dirname, '../../cookies.txt');
+  const renderCookiesPath = '/etc/secrets/cookies.txt'; // Render secret files path
   let cookiesArg = '';
 
-  if (fs.existsSync(cookiesPath)) {
+  if (fs.existsSync(renderCookiesPath)) {
+    console.log('Using Render secret cookies.txt for authentication');
+    cookiesArg = `--cookies "${renderCookiesPath}"`;
+  } else if (fs.existsSync(localCookiesPath)) {
     console.log('Using local cookies.txt for authentication');
-    cookiesArg = `--cookies "${cookiesPath}"`;
+    cookiesArg = `--cookies "${localCookiesPath}"`;
   }
 
   // Try running yt-dlp
