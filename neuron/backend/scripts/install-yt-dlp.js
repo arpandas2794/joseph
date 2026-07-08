@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Postinstall script: Downloads the correct yt-dlp standalone binary for the current platform.
- * - Linux  → yt-dlp        (fully standalone, no Python required)
- * - macOS  → yt-dlp_macos  (fully standalone, no Python required)
+ * - Linux  → yt-dlp        (standalone, no Python required)
+ * - macOS  → yt-dlp_macos  (standalone, no Python required)
  *
- * This means Render (Linux) and local Mac both get the right binary automatically.
+ * IMPORTANT: This script always exits with code 0 so it never breaks `npm install`.
  */
 const https = require('https');
 const fs = require('fs');
@@ -37,7 +37,7 @@ function download(url, dest, cb) {
     res.pipe(file);
     file.on('finish', () => file.close(cb));
     file.on('error', (err) => {
-      fs.unlink(dest, () => {});
+      try { fs.unlinkSync(dest); } catch (_) {}
       cb(err);
     });
   }).on('error', cb);
@@ -45,9 +45,17 @@ function download(url, dest, cb) {
 
 download(BINARY_URL, BIN_PATH, (err) => {
   if (err) {
-    console.error('[install-yt-dlp] Download failed:', err.message);
-    process.exit(1);
+    // NON-FATAL: warn but never break npm install
+    console.warn('[install-yt-dlp] WARNING: Download failed:', err.message);
+    console.warn('[install-yt-dlp] yt-dlp binary will be missing. Audio extraction may fall back to captions.');
+    process.exit(0); // Always exit 0 so npm install succeeds
+    return;
   }
-  fs.chmodSync(BIN_PATH, 0o755);
-  console.log(`[install-yt-dlp] Successfully installed yt-dlp to ${BIN_PATH}`);
+  try {
+    fs.chmodSync(BIN_PATH, 0o755);
+    console.log(`[install-yt-dlp] Successfully installed yt-dlp to ${BIN_PATH}`);
+  } catch (chmodErr) {
+    console.warn('[install-yt-dlp] chmod failed:', chmodErr.message);
+  }
+  process.exit(0);
 });
