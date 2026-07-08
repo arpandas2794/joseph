@@ -10,7 +10,6 @@ import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { YoutubeTranscript } from 'youtube-transcript';
-import youtubedl from 'youtube-dl-exec';
 
 const execAsync = promisify(exec);
 const router = Router();
@@ -21,49 +20,26 @@ if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
-// Run yt-dlp via youtube-dl-exec wrapper to support all OS platforms
+// Path to yt-dlp binary (downloaded by scripts/install-yt-dlp.js postinstall)
+const YTDLP_PATH = path.join(__dirname, '../../bin/yt-dlp');
+
 async function runYtdlpWithCookies(args: string, url: string): Promise<string> {
   const localCookiesPath = path.join(__dirname, '../../cookies.txt');
-  const renderCookiesPath = '/etc/secrets/cookies.txt'; // Render secret files path
-  let cookiesPath = '';
+  const renderCookiesPath = '/etc/secrets/cookies.txt';
+  let cookiesArg = '';
 
   if (fs.existsSync(renderCookiesPath)) {
     console.log('Using Render secret cookies.txt for authentication');
-    cookiesPath = renderCookiesPath;
+    cookiesArg = `--cookies "${renderCookiesPath}"`;
   } else if (fs.existsSync(localCookiesPath)) {
     console.log('Using local cookies.txt for authentication');
-    cookiesPath = localCookiesPath;
+    cookiesArg = `--cookies "${localCookiesPath}"`;
   }
 
-  // Parse args string into flags for youtube-dl-exec
-  const options: any = {};
-  if (cookiesPath) {
-    options.cookies = cookiesPath;
-  }
-  
-  if (args.includes('--dump-json')) {
-    options.dumpJson = true;
-    options.noPlaylist = true;
-  } else if (args.includes('-x --audio-format mp3')) {
-    options.extractAudio = true;
-    options.audioFormat = 'mp3';
-    // extract output path from args
-    const outMatch = args.match(/-o "([^"]+)"/);
-    if (outMatch && outMatch[1]) {
-      options.output = outMatch[1];
-    }
-    if (args.includes('youtube:player_client')) {
-      options.extractorArgs = 'youtube:player_client=android,ios,web';
-    }
-  }
-
-  try {
-    const result = await youtubedl(url, options);
-    // If dumpJson is true, result is an object. Otherwise it's the stdout string.
-    return typeof result === 'object' ? JSON.stringify(result) : String(result);
-  } catch (err: any) {
-    throw new Error(`youtube-dl-exec failed: ${err.message}`);
-  }
+  const { stdout } = await execAsync(`"${YTDLP_PATH}" ${cookiesArg} ${args} "${url}"`, {
+    maxBuffer: 1024 * 1024 * 50
+  });
+  return stdout;
 }
 
 // Proxy endpoint to bypass CDN hotlinking protection (CORS / 403 Forbidden)
