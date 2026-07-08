@@ -33,8 +33,16 @@ async function runYtdlpWithCookies(args: string, url: string): Promise<string> {
   let cookiesArg = '';
 
   if (fs.existsSync(renderCookiesPath)) {
-    console.log('Using Render secret cookies.txt for authentication');
-    cookiesArg = `--cookies "${renderCookiesPath}"`;
+    // Copy to /tmp because /etc/secrets is read-only and yt-dlp tries to write to the cookies file
+    const tmpCookiesPath = '/tmp/yt-dlp-cookies.txt';
+    try {
+      fs.copyFileSync(renderCookiesPath, tmpCookiesPath);
+      console.log('Using Render secret cookies.txt for authentication (copied to /tmp)');
+      cookiesArg = `--cookies "${tmpCookiesPath}"`;
+    } catch (copyErr: any) {
+      console.warn('Failed to copy cookies to /tmp, using original path:', copyErr.message);
+      cookiesArg = `--cookies "${renderCookiesPath}"`;
+    }
   } else if (fs.existsSync(localCookiesPath)) {
     console.log('Using local cookies.txt for authentication');
     cookiesArg = `--cookies "${localCookiesPath}"`;
