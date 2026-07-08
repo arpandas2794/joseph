@@ -477,6 +477,26 @@ router.post('/extract', upload.single('audioFile'), async (req: Request, res: Re
           }
           
           if (!transcriptText || transcriptText.trim() === '') {
+            try {
+              console.log('Attempting Apify YouTube Transcript Actor as final proxy fallback...');
+              const { ApifyClient } = require('apify-client');
+              if (process.env.APIFY_TOKEN) {
+                const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
+                const run = await client.actor('foudhil/actor-youtube-transcript').call({ videoUrls: [url] });
+                const { items } = await client.dataset(run.defaultDatasetId).listItems();
+                if (items && items.length > 0 && items[0].transcript) {
+                  transcriptText = items[0].transcript;
+                  console.log('Successfully fell back to Apify YouTube Transcript actor (Proxy successful).');
+                }
+              } else {
+                console.log('No APIFY_TOKEN found for Apify fallback.');
+              }
+            } catch (apifyErr: any) {
+              console.warn('Apify YouTube Transcript fallback also failed:', apifyErr.message);
+            }
+          }
+          
+          if (!transcriptText || transcriptText.trim() === '') {
             transcriptText = '[No audio extracted, and no closed captions available]';
           }
         } else if (!isYoutube && (!transcriptText || transcriptText.trim() === '')) {
