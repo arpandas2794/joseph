@@ -108,6 +108,7 @@ export const workspaceApi = {
     if (isYoutube) {
       try {
         const apis = [
+          "https://api.cobalt.tools", // Official instance allows CORS
           "https://api-cobalt.eversiege.network",
           "https://cobaltapi.squair.xyz",
           "https://api.qwkuns.me",
@@ -119,21 +120,34 @@ export const workspaceApi = {
         let audioBlob = null;
         for (const api of apis) {
           try {
-            const res = await fetch(api, {
+            let res = await fetch(api, {
               method: 'POST',
               headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
               body: JSON.stringify({ url, downloadMode: 'audio', audioFormat: 'mp3' })
+            }).catch(async (err) => {
+              // If CORS blocks the direct request, try again via a CORS proxy
+              console.log(`Direct fetch to ${api} failed (likely CORS). Retrying with corsproxy...`);
+              return await fetch(`https://corsproxy.io/?${encodeURIComponent(api)}`, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, downloadMode: 'audio', audioFormat: 'mp3' })
+              });
             });
-            const data = await res.json();
-            if (data && data.url) {
-              const streamRes = await fetch(data.url);
-              if (streamRes.ok) {
-                audioBlob = await streamRes.blob();
-                break;
+
+            if (res && res.ok) {
+              const data = await res.json();
+              if (data && data.url) {
+                const streamRes = await fetch(data.url).catch(async () => {
+                  return await fetch(`https://corsproxy.io/?${encodeURIComponent(data.url)}`);
+                });
+                if (streamRes && streamRes.ok) {
+                  audioBlob = await streamRes.blob();
+                  break;
+                }
               }
             }
           } catch (e) {
-            console.warn(`Cobalt API ${api} failed:`, e);
+            console.warn(`Cobalt API ${api} failed completely:`, e);
           }
         }
         if (audioBlob) {
