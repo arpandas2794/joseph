@@ -124,11 +124,44 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
 
     // Method 3: Try Apify YouTube Transcript Actor
     if (process.env.APIFY_TOKEN) {
+        const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        const { ApifyClient } = require('apify-client');
+        const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
+
+        // Try harshmaur/youtube-transcript-scraper first (more active and robust)
+        try {
+            console.log(`[YouTubeTranscript] Fetching transcript via Apify actor 'harshmaur/youtube-transcript-scraper' for: ${videoId}`);
+            const run = await client.actor('harshmaur/youtube-transcript-scraper').call({ videoUrls: [cleanUrl] });
+            const { items } = await client.dataset(run.defaultDatasetId).listItems();
+            if (items && items.length > 0) {
+                // If it's a list of segments
+                if (items.length > 1 && items[0].text !== undefined) {
+                    const transcriptText = items.map((t: any) => t.text || '').join(' ');
+                    if (transcriptText.trim().length > 0) {
+                        console.log(`[YouTubeTranscript] Apify harshmaur success (multi-segment).`);
+                        return transcriptText;
+                    }
+                }
+                // If it's a single item containing the full text
+                else {
+                    let transcriptText = items[0].transcript || items[0].text;
+                    if (Array.isArray(transcriptText)) {
+                        transcriptText = transcriptText.map((t: any) => t.text || '').join(' ');
+                    }
+                    if (typeof transcriptText === 'string' && transcriptText.trim().length > 0) {
+                        console.log(`[YouTubeTranscript] Apify harshmaur success (single item).`);
+                        return transcriptText;
+                    }
+                }
+            }
+        } catch (apifyErr: any) {
+            console.warn(`[YouTubeTranscript] Apify harshmaur failed: ${apifyErr.message}`);
+        }
+
+        // Try foudhil/actor-youtube-transcript as fallback
         try {
             console.log(`[YouTubeTranscript] Fetching transcript via Apify actor 'foudhil/actor-youtube-transcript' for: ${videoId}`);
-            const { ApifyClient } = require('apify-client');
-            const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
-            const run = await client.actor('foudhil/actor-youtube-transcript').call({ videoUrls: [url] });
+            const run = await client.actor('foudhil/actor-youtube-transcript').call({ videoUrls: [cleanUrl] });
             const { items } = await client.dataset(run.defaultDatasetId).listItems();
             if (items && items.length > 0) {
                 let transcriptText = items[0].transcript || items[0].text;
@@ -137,13 +170,13 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
                         transcriptText = transcriptText.map((t: any) => t.text || '').join(' ');
                     }
                     if (typeof transcriptText === 'string' && transcriptText.trim().length > 0) {
-                        console.log(`[YouTubeTranscript] Apify success.`);
+                        console.log(`[YouTubeTranscript] Apify foudhil success.`);
                         return transcriptText;
                     }
                 }
             }
         } catch (apifyErr: any) {
-            console.warn(`[YouTubeTranscript] Apify failed: ${apifyErr.message}`);
+            console.warn(`[YouTubeTranscript] Apify foudhil failed: ${apifyErr.message}`);
         }
     } else {
         console.log(`[YouTubeTranscript] APIFY_TOKEN is not set, skipping Apify fallback.`);
