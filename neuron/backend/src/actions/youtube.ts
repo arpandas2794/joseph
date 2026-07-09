@@ -67,6 +67,7 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
 
     // Method 2: Try Local yt-dlp (Robust but Slower)
     let subPath = '';
+    let tempCookiesPath = '';
     try {
         console.log(`[YouTubeTranscript] Fetching subs via yt-dlp for: ${videoId}`);
         
@@ -89,9 +90,12 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
             args.push('--proxy', process.env.SOCIAL_MEDIA_PROXY);
         }
 
-        const cookiesPath = process.env.YT_DLP_COOKIES_PATH || path.join(process.cwd(), 'cookies.txt');
-        if (await fs.stat(cookiesPath).catch(() => null)) {
-            args.push('--cookies', cookiesPath);
+        const envCookiesPath = process.env.YT_DLP_COOKIES_PATH || path.join(process.cwd(), 'cookies.txt');
+        if (await fs.stat(envCookiesPath).catch(() => null)) {
+            // Copy cookies to writable temp dir to prevent write-back OSError on read-only file systems (like Render's secrets)
+            tempCookiesPath = path.join(os.tmpdir(), `cookies-${tempId}.txt`);
+            await fs.copyFile(envCookiesPath, tempCookiesPath);
+            args.push('--cookies', tempCookiesPath);
         }
 
         await execFilePromise(binaryPath, args);
@@ -110,6 +114,9 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
     } finally {
         if (subPath) {
             try { await fs.unlink(subPath); } catch (e) { }
+        }
+        if (tempCookiesPath) {
+            try { await fs.unlink(tempCookiesPath); } catch (e) { }
         }
     }
 
@@ -151,11 +158,11 @@ export async function getYouTubeMetadata(url: string): Promise<{ title: string; 
     }
 
     // 1. Try yt-dlp (Robust but Slower)
+    let tempCookiesPath = '';
     try {
         const binaryName = process.platform === 'darwin' ? 'yt-dlp' : 'yt-dlp-linux';
         const binaryPath = path.join(__dirname, '../../bin', binaryName);
         const envCookiesPath = process.env.YT_DLP_COOKIES_PATH || path.join(process.cwd(), 'cookies.txt');
-        const cookiesPath = (await fs.stat(envCookiesPath).catch(() => null)) ? envCookiesPath : null;
         
         const cacheDir = path.join(process.cwd(), '.yt-dlp-cache');
         const hasCacheDir = (await fs.stat(cacheDir).catch(() => null));
@@ -173,7 +180,11 @@ export async function getYouTubeMetadata(url: string): Promise<{ title: string; 
             '--referer', 'https://www.youtube.com/'
         ];
 
-        if (cookiesPath) args.push('--cookies', cookiesPath);
+        if (await fs.stat(envCookiesPath).catch(() => null)) {
+            tempCookiesPath = path.join(os.tmpdir(), `cookies-meta-${uuidv4()}.txt`);
+            await fs.copyFile(envCookiesPath, tempCookiesPath);
+            args.push('--cookies', tempCookiesPath);
+        }
         if (hasCacheDir) args.push('--cache-dir', cacheDir);
 
         // Executing binary safely
@@ -196,6 +207,10 @@ export async function getYouTubeMetadata(url: string): Promise<{ title: string; 
         }
     } catch (error: any) {
         console.warn("[YouTubeMetadata] yt-dlp failed, trying fallback:", error.message);
+    } finally {
+        if (tempCookiesPath) {
+            try { await fs.unlink(tempCookiesPath); } catch (e) { }
+        }
     }
 
     // 2. Fallback to oEmbed (Fast, but no duration)
