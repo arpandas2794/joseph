@@ -98,7 +98,9 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
             args.push('--cookies', tempCookiesPath);
         }
 
-        await execFilePromise(binaryPath, args);
+        const { stdout, stderr } = await execFilePromise(binaryPath, args);
+        console.log(`[YouTubeTranscript] yt-dlp stdout:`, stdout);
+        if (stderr) console.warn(`[YouTubeTranscript] yt-dlp stderr:`, stderr);
 
         const files = await fs.readdir(tempDir);
         const subFile = files.find(f => f.startsWith(tempId) && f.endsWith('.vtt'));
