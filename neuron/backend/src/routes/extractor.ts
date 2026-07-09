@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import multer from 'multer';
 import axios from 'axios';
-import { fetchYouTubeTranscript } from '../actions/youtube';
+import { fetchYouTubeTranscript, getVideoId } from '../actions/youtube';
 
 const router = express.Router();
 const upload = multer({ dest: '/tmp/' });
@@ -33,7 +33,7 @@ export const extractAudio = async (req: Request, res: Response) => {
             metadata: {
                 title,
                 channel,
-                videoId: url,
+                videoId: getVideoId(url) || url,
                 thumbnail
             }
         });

@@ -33,7 +33,7 @@ function cleanVTT(content: string): string {
     return cleaned.join(' ');
 }
 
-function getVideoId(url: string) {
+export function getVideoId(url: string) {
     try {
         const urlObj = new URL(url);
         if (urlObj.hostname.includes('youtube.com')) {
