@@ -8,6 +8,8 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
+import { createReadStream } from 'fs';
+import Groq from 'groq-sdk';
 
 const execFilePromise = util.promisify(execFile);
 
@@ -56,7 +58,13 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
     // Method 1: Try youtube-transcript (Fastest and Most Reliable)
     try {
         console.log(`[YouTubeTranscript] Fetching transcript via youtube-transcript...`);
-        const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+        let transcript;
+        try {
+            transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
+        } catch (langErr: any) {
+            console.warn(`[YouTubeTranscript] youtube-transcript English failed, trying default language: ${langErr.message}`);
+            transcript = await YoutubeTranscript.fetchTranscript(videoId);
+        }
         if (transcript && transcript.length > 0) {
             console.log(`[YouTubeTranscript] youtube-transcript success.`);
             return transcript.map((i: any) => i.text).join(' ');
@@ -131,7 +139,10 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
         // Try harshmaur/youtube-transcript-scraper first (more active and robust)
         try {
             console.log(`[YouTubeTranscript] Fetching transcript via Apify actor 'harshmaur/youtube-transcript-scraper' for: ${videoId}`);
-            const run = await client.actor('harshmaur/youtube-transcript-scraper').call({ videoUrls: [cleanUrl] });
+            const run = await client.actor('harshmaur/youtube-transcript-scraper').call({ 
+                videoUrls: [cleanUrl],
+                language: 'en'
+            });
             const { items } = await client.dataset(run.defaultDatasetId).listItems();
             if (items && items.length > 0) {
                 // If it's a list of segments
@@ -180,6 +191,48 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
         }
     } else {
         console.log(`[YouTubeTranscript] APIFY_TOKEN is not set, skipping Apify fallback.`);
+    }
+
+    // Method 4: Try Cobalt download + Groq Whisper transcription (Bulletproof audio transcription fallback)
+    if (process.env.GROQ_API_KEY) {
+        try {
+            console.log(`[YouTubeTranscript] Fetching transcript via Cobalt + Groq Whisper for: ${videoId}`);
+            const tempAudioPath = path.join(os.tmpdir(), `yt-audio-${uuidv4()}.mp3`);
+            
+            const cobaltUrl = await fetchCobaltAudioUrl(url);
+            if (cobaltUrl) {
+                console.log(`[YouTubeTranscript] Downloading audio from Cobalt: ${cobaltUrl}`);
+                const response = await axios({
+                    method: 'GET',
+                    url: cobaltUrl,
+                    responseType: 'stream'
+                });
+                
+                // Write stream using fs
+                const { createWriteStream } = require('fs');
+                const writer = createWriteStream(tempAudioPath);
+                response.data.pipe(writer);
+                await new Promise((resolve, reject) => {
+                    writer.on('finish', resolve);
+                    writer.on('error', reject);
+                });
+                
+                console.log(`[YouTubeTranscript] Audio downloaded, transcribing via Groq...`);
+                const transcriptText = await transcribeAudioWithGroq(tempAudioPath);
+                
+                // Clean up audio file
+                try { await fs.unlink(tempAudioPath); } catch (e) { }
+                
+                if (transcriptText && transcriptText.trim().length > 0) {
+                    console.log(`[YouTubeTranscript] Groq success.`);
+                    return transcriptText;
+                }
+            }
+        } catch (groqErr: any) {
+            console.warn(`[YouTubeTranscript] Cobalt/Groq fallback failed: ${groqErr.message}`);
+        }
+    } else {
+        console.log(`[YouTubeTranscript] GROQ_API_KEY is not set, skipping Groq fallback.`);
     }
 
     console.error(`[YouTubeTranscript] All methods failed for ${videoId}`);
@@ -290,5 +343,76 @@ export async function getYouTubeMetadata(url: string): Promise<{ title: string; 
     }
 
     return null;
+}
+
+// Helpers for Cobalt download + Groq transcription
+
+async function fetchCobaltAudioUrl(url: string): Promise<string | null> {
+  const apis = [
+    "https://api-cobalt.eversiege.network",
+    "https://cobaltapi.squair.xyz",
+    "https://api.qwkuns.me",
+    "https://nuko-c.meowing.de",
+    "https://lime.clxxped.lol",
+    "https://rue-cobalt.xenon.zone"
+  ];
+  const postData = { url, downloadMode: 'audio', audioFormat: 'mp3' };
+  const headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  };
+
+  for (const api of apis) {
+    try {
+      const res = await axios.post(api, postData, { headers, timeout: 8000 });
+      if (res.data && res.data.url) return res.data.url;
+    } catch (err: any) {
+      console.warn(`Cobalt API ${api} failed:`, err.message);
+    }
+  }
+
+  try {
+    const dirRes = await axios.get('https://cobalt.directory/api/working?type=api', { timeout: 10000 });
+    const dirApis = dirRes.data?.data?.youtube;
+    if (dirApis && Array.isArray(dirApis)) {
+      for (const api of dirApis) {
+        if (apis.includes(api)) continue;
+        try {
+          const res = await axios.post(api, postData, { headers, timeout: 10000 });
+          if (res.data && res.data.url) return res.data.url;
+        } catch (e: any) {
+          console.warn(`Fallback Cobalt API ${api} failed:`, e.message);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('Failed to fetch Cobalt directory:', err.message);
+  }
+  return null;
+}
+
+async function transcribeAudioWithGroq(audioPath: string): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error('Groq API key is missing. Please set GROQ_API_KEY in your backend .env file to enable transcribing.');
+  }
+
+  const groq = new Groq({ apiKey });
+  console.log(`Uploading audio to Groq Whisper API: ${audioPath}`);
+
+  try {
+    const transcription = await groq.audio.transcriptions.create({
+      file: createReadStream(audioPath),
+      model: "whisper-large-v3",
+      response_format: "verbose_json",
+    });
+    
+    console.log('Transcript generated with Groq whisper-large-v3.');
+    return transcription.text || '';
+  } catch (err: any) {
+    console.error('Groq transcription failed:', err.message || err);
+    throw new Error('Groq transcription failed: ' + (err.message || 'Unknown error'));
+  }
 }
 
