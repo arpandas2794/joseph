@@ -106,7 +106,7 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
             return cleanVTT(content);
         }
     } catch (error: any) {
-        console.warn(`[YouTubeTranscript] yt-dlp failed: ${error.message.split('\n')[0]}...`);
+        console.warn(`[YouTubeTranscript] yt-dlp failed:`, error.message);
     } finally {
         if (subPath) {
             try { await fs.unlink(subPath); } catch (e) { }
