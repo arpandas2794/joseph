@@ -122,6 +122,33 @@ export async function fetchYouTubeTranscript(url: string): Promise<string | null
         }
     }
 
+    // Method 3: Try Apify YouTube Transcript Actor
+    if (process.env.APIFY_TOKEN) {
+        try {
+            console.log(`[YouTubeTranscript] Fetching transcript via Apify actor 'foudhil/actor-youtube-transcript' for: ${videoId}`);
+            const { ApifyClient } = require('apify-client');
+            const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
+            const run = await client.actor('foudhil/actor-youtube-transcript').call({ videoUrls: [url] });
+            const { items } = await client.dataset(run.defaultDatasetId).listItems();
+            if (items && items.length > 0) {
+                let transcriptText = items[0].transcript || items[0].text;
+                if (transcriptText) {
+                    if (Array.isArray(transcriptText)) {
+                        transcriptText = transcriptText.map((t: any) => t.text || '').join(' ');
+                    }
+                    if (typeof transcriptText === 'string' && transcriptText.trim().length > 0) {
+                        console.log(`[YouTubeTranscript] Apify success.`);
+                        return transcriptText;
+                    }
+                }
+            }
+        } catch (apifyErr: any) {
+            console.warn(`[YouTubeTranscript] Apify failed: ${apifyErr.message}`);
+        }
+    } else {
+        console.log(`[YouTubeTranscript] APIFY_TOKEN is not set, skipping Apify fallback.`);
+    }
+
     console.error(`[YouTubeTranscript] All methods failed for ${videoId}`);
     return null;
 }
