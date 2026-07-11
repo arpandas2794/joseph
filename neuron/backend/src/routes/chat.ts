@@ -224,7 +224,7 @@ Connected Context Sources:\n`;
       ];
 
       const completion = await anthropic.messages.create({
-        model: selectedModel.includes('haiku') ? 'claude-3-5-haiku-20241022' : 'claude-3-5-sonnet-20241022',
+        model: selectedModel.includes('haiku') ? 'claude-3-haiku-20240307' : 'claude-3-5-sonnet-20240620',
         system: systemPrompt,
         messages: anthropicMessages as any,
         max_tokens: 4096
