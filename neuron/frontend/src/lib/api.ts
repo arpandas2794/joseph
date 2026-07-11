@@ -260,11 +260,12 @@ export const workspaceApi = {
     return data || [];
   },
 
-  async sendMessage(conversationId: string, chatCardId: string, message: string, model: string) {
+  async sendMessage(conversationId: string, chatCardId: string, message: string, model: string, apiKey?: string) {
     const response = await fetch('http://localhost:3001/api/chat', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'x-api-key': apiKey } : {})
       },
       body: JSON.stringify({ conversationId, chatCardId, message, model })
     });

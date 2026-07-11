@@ -3,6 +3,7 @@ import { ArrowLeft, Sparkles, Send, Bot, User, BrainCircuit, Plus, Loader2, Menu
 import { motion, AnimatePresence } from 'framer-motion';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
+import { useSettingsStore } from '../../store/settingsStore';
 
 interface MobileChatScreenProps {
   workspaceId: string;
@@ -13,7 +14,7 @@ interface MobileChatScreenProps {
 const MODELS = [
   { id: 'gemini', name: 'Gemini 2.5 Flash' },
   { id: 'openai', name: 'GPT-4o' },
-  { id: 'anthropic', name: 'Claude 3.5 Sonnet' }
+  { id: 'anthropic', name: 'Claude Sonnet 5' }
 ];
 
 export default function MobileChatScreen({ workspaceId, chatNode, onBack }: MobileChatScreenProps) {
@@ -29,6 +30,7 @@ export default function MobileChatScreen({ workspaceId, chatNode, onBack }: Mobi
   const [isContextSheetOpen, setIsContextSheetOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const { apiKeys, setIsSettingsModalOpen } = useSettingsStore();
   const { edges, nodes } = useCanvasStore();
   const incomingConnections = edges.filter(e => e.target === chatNode.id);
   const contextNodes = incomingConnections.map(e => nodes.find(n => n.id === e.source)).filter(Boolean);
@@ -73,6 +75,19 @@ export default function MobileChatScreen({ workspaceId, chatNode, onBack }: Mobi
   const handleSend = async () => {
     if (!inputMessage.trim() || isLoading) return;
 
+    const currentApiKey = apiKeys[selectedModel as keyof typeof apiKeys];
+    if (!currentApiKey) {
+      // Display inline error or open settings modal
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `**Error:** API Key required for ${MODELS.find(m => m.id === selectedModel)?.name}. Please add it in Settings.`,
+        created_at: new Date().toISOString()
+      }]);
+      setIsSettingsModalOpen(true);
+      return;
+    }
+
     let convId = activeConversationId;
     
     // Create conversation if none exists
@@ -102,7 +117,7 @@ export default function MobileChatScreen({ workspaceId, chatNode, onBack }: Mobi
 
     try {
       // Use selected model
-      await workspaceApi.sendMessage(convId, chatNode.id, currentInput, selectedModel);
+      await workspaceApi.sendMessage(convId, chatNode.id, currentInput, selectedModel, currentApiKey);
       await loadMessages(convId);
     } catch (err: any) {
       console.error('Failed to send message', err);

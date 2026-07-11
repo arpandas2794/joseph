@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '../store/authStore';
-import { LogOut, BrainCircuit, LayoutGrid, Plus, MoreVertical, Trash2, Loader2, FolderOpen, X, Sparkles } from 'lucide-react';
+import { LogOut, BrainCircuit, LayoutGrid, Plus, MoreVertical, Trash2, Loader2, FolderOpen, X, Sparkles, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { workspaceApi } from '../lib/api';
 import type { Workspace } from '../types/database';
+import SettingsModal from '../components/shared/SettingsModal';
+import { useSettingsStore } from '../store/settingsStore';
 
 export default function Dashboard() {
   const { user, signOut } = useAuthStore();
@@ -12,6 +14,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const { setIsSettingsModalOpen } = useSettingsStore();
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -104,13 +107,22 @@ export default function Dashboard() {
             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-blue-500 flex-shrink-0" />
             <span className="text-sm truncate text-gray-300">{user?.email}</span>
           </div>
-          <button
-            onClick={signOut}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
-            title="Log out"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+              title="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <button
+              onClick={signOut}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+              title="Log out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -279,6 +291,9 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Settings Modal */}
+      <SettingsModal />
     </div>
   );
 }

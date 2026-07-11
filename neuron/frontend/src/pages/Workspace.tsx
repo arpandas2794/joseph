@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Check, Smartphone, Monitor } from 'lucide-react';
+import { ArrowLeft, Loader2, Check, Smartphone, Monitor, Settings } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { workspaceApi } from '../lib/api';
 import type { Workspace } from '../types/database';
@@ -8,6 +8,8 @@ import Canvas from '../components/canvas/Canvas';
 import { ReactFlowProvider } from '@xyflow/react';
 import MobileWorkspace from '../components/mobile/MobileWorkspace';
 import { useCanvasStore } from '../store/canvasStore';
+import SettingsModal from '../components/shared/SettingsModal';
+import { useSettingsStore } from '../store/settingsStore';
 
 export default function WorkspacePage() {
   const { id } = useParams<{ id: string }>();
@@ -33,6 +35,7 @@ export default function WorkspacePage() {
   
   const lastSaved = useCanvasStore((state) => state.lastSaved);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const { setIsSettingsModalOpen } = useSettingsStore();
 
   useEffect(() => {
     async function fetchWorkspace() {
@@ -141,6 +144,14 @@ export default function WorkspacePage() {
         
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setIsSettingsModalOpen(true)}
+            className="hidden sm:flex p-1.5 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+            title="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+          
+          <button
             onClick={() => setIsMobileView(!isMobileView)}
             className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium text-gray-300 hover:text-white transition-colors"
           >
@@ -176,6 +187,9 @@ export default function WorkspacePage() {
           </ReactFlowProvider>
         )}
       </main>
+      
+      {/* Settings Modal */}
+      <SettingsModal />
     </div>
   );
 }

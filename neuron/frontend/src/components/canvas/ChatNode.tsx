@@ -4,6 +4,7 @@ import SmartHandle from './SmartHandle';
 import { useParams } from 'react-router-dom';
 import { workspaceApi } from '../../lib/api';
 import { useCanvasStore } from '../../store/canvasStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { 
   Sparkles, MessageSquare, Send, Mic, 
   Trash2, ChevronDown, Bot, User, BrainCircuit,
@@ -14,13 +15,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 const MODELS = [
   { id: 'gemini', name: 'Gemini 2.5 Flash' },
   { id: 'openai', name: 'GPT-4o' },
-  { id: 'anthropic', name: 'Claude 3.5 Sonnet' }
+  { id: 'anthropic', name: 'Claude Sonnet 5' }
 ];
 
 export default function ChatNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
   const { id: workspaceId } = useParams<{ id: string }>();
   const reactFlow = useReactFlow();
   const removeNode = useCanvasStore((state) => state.removeNode);
+  const { apiKeys, setIsSettingsModalOpen } = useSettingsStore();
 
   // Conversations & Messages State
   const [conversations, setConversations] = useState<any[]>([]);
@@ -182,6 +184,13 @@ export default function ChatNode({ id, data, selected }: { id: string, data: any
     const text = (textToSend || inputMessage).trim();
     if (!text || isLoading) return;
 
+    const currentApiKey = apiKeys[selectedModel as keyof typeof apiKeys];
+    if (!currentApiKey) {
+      setErrorMsg(`API Key required for ${MODELS.find(m => m.id === selectedModel)?.name}. Please add it in Settings.`);
+      setIsSettingsModalOpen(true);
+      return;
+    }
+
     let convId = activeConversationId;
     setErrorMsg('');
 
@@ -211,7 +220,7 @@ export default function ChatNode({ id, data, selected }: { id: string, data: any
       }
 
       // Send message to backend
-      await workspaceApi.sendMessage(convId!, id, text, selectedModel);
+      await workspaceApi.sendMessage(convId!, id, text, selectedModel, currentApiKey);
       
       // Load updated message list from DB to ensure sync
       await loadMessages(convId!);

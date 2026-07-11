@@ -185,12 +185,14 @@ Connected Context Sources:\n`;
     // 6. Call the LLM provider based on user model selection
     const selectedModel = (model || '').toLowerCase();
     let assistantResponse = '';
+    
+    const providedApiKey = req.headers['x-api-key'] as string;
 
     if (selectedModel.includes('openai') || selectedModel.includes('gpt')) {
       // --- OpenAI ---
-      const apiKey = process.env.OPENAI_API_KEY;
+      const apiKey = providedApiKey || process.env.OPENAI_API_KEY;
       if (!apiKey) {
-        throw new Error('OPENAI_API_KEY is not configured in the backend .env file.');
+        throw new Error('OpenAI API Key is required. Please add it in your settings.');
       }
       const openai = new OpenAI({ apiKey });
       const openAiMessages = [
@@ -210,9 +212,9 @@ Connected Context Sources:\n`;
 
     } else if (selectedModel.includes('anthropic') || selectedModel.includes('claude')) {
       // --- Anthropic ---
-      const apiKey = process.env.ANTHROPIC_API_KEY;
+      const apiKey = providedApiKey || process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
-        throw new Error('ANTHROPIC_API_KEY is not configured in the backend .env file.');
+        throw new Error('Anthropic API Key is required. Please add it in your settings.');
       }
       const anthropic = new Anthropic({ apiKey });
       const anthropicMessages = [
@@ -224,18 +226,19 @@ Connected Context Sources:\n`;
       ];
 
       const completion = await anthropic.messages.create({
-        model: selectedModel.includes('haiku') ? 'claude-3-haiku-20240307' : 'claude-3-5-sonnet-20240620',
+        model: selectedModel.includes('haiku') ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-5',
         system: systemPrompt,
         messages: anthropicMessages as any,
         max_tokens: 4096
       });
-      assistantResponse = completion.content[0]?.type === 'text' ? completion.content[0].text : '';
+      const textBlock = completion.content.find((block: any) => block.type === 'text');
+      assistantResponse = textBlock ? (textBlock as any).text : '';
 
     } else {
       // --- Gemini (Default) ---
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = providedApiKey || process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error('GEMINI_API_KEY is not configured in the backend .env file.');
+        throw new Error('Google Gemini API Key is required. Please add it in your settings.');
       }
       const genAI = new GoogleGenerativeAI(apiKey);
       const geminiModel = genAI.getGenerativeModel({
