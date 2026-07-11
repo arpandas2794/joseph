@@ -134,7 +134,50 @@ interface CanvasProps {
 
 export default function Canvas({ workspaceId }: CanvasProps) {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, setNodes, setEdges } = useCanvasStore();
-  const { setCenter, getZoom } = useReactFlow();
+  const { setCenter, getZoom, screenToFlowPosition } = useReactFlow();
+
+  const getNewNodePosition = (nodeWidth: number = 256, nodeHeight: number = 256) => {
+    const centerFlow = screenToFlowPosition({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2
+    });
+
+    let x = centerFlow.x - (nodeWidth / 2);
+    let y = centerFlow.y - (nodeHeight / 2);
+
+    const padding = 20;
+    let overlaps = true;
+    let iterations = 0;
+    const currentNodes = useCanvasStore.getState().nodes;
+    
+    while (overlaps && iterations < 50) {
+      overlaps = currentNodes.some(n => {
+        const nx = n.position.x;
+        const ny = n.position.y;
+        const nw = typeof n.style?.width === 'number' ? n.style.width : (n.width || 256);
+        const nh = typeof n.style?.height === 'number' ? n.style.height : (n.height || 256);
+        
+        return (
+          x < nx + nw + padding &&
+          x + nodeWidth + padding > nx &&
+          y < ny + nh + padding &&
+          y + nodeHeight + padding > ny
+        );
+      });
+      
+      if (overlaps) {
+        x += 30; 
+        y += 30;
+        iterations++;
+      }
+    }
+
+    return { x, y };
+  };
+
+  const focusOnNode = (x: number, y: number, nodeWidth: number = 256, nodeHeight: number = 256) => {
+    setCenter(x + nodeWidth / 2, y + nodeHeight / 2, { zoom: Math.max(getZoom(), 1), duration: 800 });
+  };
   const [showLinkModal, setShowLinkModal] = React.useState(false);
   const [activePlatform, setActivePlatform] = React.useState<Platform>('youtube');
   const [linkUrl, setLinkUrl] = React.useState('');
@@ -157,13 +200,15 @@ export default function Canvas({ workspaceId }: CanvasProps) {
 
   const handleAddDocument = async () => {
     const nodeId = crypto.randomUUID();
+    const position = getNewNodePosition(256, 256);
     const newNode = {
       id: nodeId,
       type: 'document',
-      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      position,
       data: { content: '<h1>Untitled Document</h1><p>Start writing here...</p>' },
     };
     addNode(newNode);
+    focusOnNode(position.x, position.y);
     try {
       await workspaceApi.upsertCard(workspaceId, newNode);
       useCanvasStore.getState().setLastSaved(new Date());
@@ -174,14 +219,16 @@ export default function Canvas({ workspaceId }: CanvasProps) {
 
   const handleAddChat = async () => {
     const nodeId = crypto.randomUUID();
+    const position = getNewNodePosition(640, 520);
     const newNode = {
       id: nodeId,
       type: 'ai_chat',
-      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      position,
       style: { width: 640, height: 520 },
       data: { title: 'AI Assistant', content: '' },
     };
     addNode(newNode);
+    focusOnNode(position.x, position.y, 640, 520);
     try {
       await workspaceApi.upsertCard(workspaceId, newNode);
       useCanvasStore.getState().setLastSaved(new Date());
@@ -313,16 +360,18 @@ export default function Canvas({ workspaceId }: CanvasProps) {
   }, [isGroupingMode, workspaceId]);
 
   const handleAddSticky = async () => {
+    const position = getNewNodePosition(256, 256);
     const newNode = {
       id: crypto.randomUUID(),
       type: 'sticky',
-      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      position,
       style: { width: 256, height: 256 },
       data: { title: 'Untitled', content: '', color: 'bg-yellow-200' },
     };
 
     // Add locally immediately for fast UI
     addNode(newNode);
+    focusOnNode(position.x, position.y);
 
     // Save to DB
     try {
@@ -439,16 +488,18 @@ export default function Canvas({ workspaceId }: CanvasProps) {
       height = 400; // default for shorts/reels
     }
 
+    const position = getNewNodePosition(width, height);
     const newNode = {
       id: nodeId,
       type: initialType,
-      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      position,
       style: { width, height },
       data: initialData,
     };
 
     // Immediately add to canvas and DB so the user sees it
     addNode(newNode);
+    focusOnNode(position.x, position.y, width, height);
     try {
       await workspaceApi.upsertCard(workspaceId, newNode);
     } catch (err) {
@@ -536,11 +587,12 @@ export default function Canvas({ workspaceId }: CanvasProps) {
   };
 
   const handleAddAnnotation = async () => {
+    const position = getNewNodePosition(300, 200);
     const newNode = {
       id: crypto.randomUUID(),
       type: 'annotation',
-      position: { x: Math.random() * 300 + 100, y: Math.random() * 200 + 80 },
-      style: { width: 360, height: 60 },
+      position,
+      style: { width: 300, height: 200 },
       data: { text: 'Headline', size: 'xl', color: 'white' },
     };
     addNode(newNode);
@@ -603,11 +655,12 @@ export default function Canvas({ workspaceId }: CanvasProps) {
           setVoiceStatus('Creating Voice Note card...');
 
           // 3. Create Voice Node
+          const position = getNewNodePosition(280, 180);
           const newNode = {
             id: crypto.randomUUID(),
             type: 'voice',
-            position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
-            style: { width: 320, height: 280 },
+            position,
+            style: { width: 280, height: 180 },
             data: {
               customTitle: 'Voice Note',
               content: transcript,
@@ -616,6 +669,7 @@ export default function Canvas({ workspaceId }: CanvasProps) {
           };
 
           addNode(newNode);
+          focusOnNode(position.x, position.y, 280, 180);
           await workspaceApi.upsertCard(workspaceId, newNode);
           useCanvasStore.getState().setLastSaved(new Date());
 
@@ -821,10 +875,7 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
     setIsUploading(true);
     // Create a temporary loading node
     const tempId = crypto.randomUUID();
-    const position = {
-      x: window.innerWidth / 2 - 150 + (Math.random() * 50 - 25),
-      y: window.innerHeight / 2 - 100 + (Math.random() * 50 - 25),
-    };
+    const position = getNewNodePosition(256, 256);
 
     const targetType = file.type.startsWith('image/') ? 'image' : 'file';
 
@@ -839,6 +890,7 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
       },
     };
     addNode(tempNode);
+    focusOnNode(position.x, position.y);
 
     try {
       const response = await workspaceApi.uploadFile(file);
