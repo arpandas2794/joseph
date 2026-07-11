@@ -21,12 +21,24 @@ export const useAuthStore = create<AuthState>((set) => ({
   initializeAuth: () => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      set({ user: session?.user ?? null, loading: false });
+      const user = session?.user ?? null;
+      set({ user, loading: false });
+      if (user) {
+        import('./settingsStore').then(({ useSettingsStore }) => {
+          useSettingsStore.getState().loadFromSupabase(user);
+        });
+      }
     });
 
     // Listen for auth changes
     supabase.auth.onAuthStateChange((_event, session) => {
-      set({ user: session?.user ?? null, loading: false });
+      const user = session?.user ?? null;
+      set({ user, loading: false });
+      if (user) {
+        import('./settingsStore').then(({ useSettingsStore }) => {
+          useSettingsStore.getState().loadFromSupabase(user);
+        });
+      }
     });
   },
 }));

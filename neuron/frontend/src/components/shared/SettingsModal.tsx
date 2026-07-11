@@ -99,7 +99,10 @@ export default function SettingsModal() {
 
         <div className="p-6 border-t border-white/5 flex-shrink-0 bg-black/20">
           <button
-            onClick={() => setIsSettingsModalOpen(false)}
+            onClick={async () => {
+              setIsSettingsModalOpen(false);
+              await useSettingsStore.getState().syncToSupabase();
+            }}
             className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-colors shadow-[0_0_20px_rgba(99,102,241,0.2)]"
           >
             Save & Close
