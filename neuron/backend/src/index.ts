@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import extractorRoutes from './routes/extractor';
 import voiceRoutes from './routes/voice';
 import chatRoutes from './routes/chat';
-
+import uploadRoutes from './routes/upload';
 dotenv.config();
 
 const app = express();
@@ -17,7 +17,7 @@ app.use(express.json());
 app.use('/api', extractorRoutes);
 app.use('/api', voiceRoutes);
 app.use('/api', chatRoutes);
-
+app.use('/api/upload', uploadRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });

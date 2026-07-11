@@ -1,8 +1,6 @@
 import { supabase } from './supabase';
 import type { Workspace } from '../types/database';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
 export const workspaceApi = {
   async getWorkspaces(): Promise<Workspace[]> {
     const { data, error } = await supabase
@@ -101,74 +99,13 @@ export const workspaceApi = {
 
   async extractLink(url: string) {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    
-    const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
-    
-    let formData = new FormData();
-    formData.append('url', url);
-
-    if (isYoutube) {
-      try {
-        const apis = [
-          "https://api.cobalt.tools", // Official instance allows CORS
-          "https://api-cobalt.eversiege.network",
-          "https://cobaltapi.squair.xyz",
-          "https://api.qwkuns.me",
-          "https://nuko-c.meowing.de",
-          "https://lime.clxxped.lol",
-          "https://rue-cobalt.xenon.zone"
-        ];
-        
-        let audioBlob = null;
-        for (const api of apis) {
-          try {
-            let res = await fetch(api, {
-              method: 'POST',
-              headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-              body: JSON.stringify({ url, downloadMode: 'audio', audioFormat: 'mp3' })
-            }).catch(async (err) => {
-              // If CORS blocks the direct request, try again via a CORS proxy
-              console.log(`Direct fetch to ${api} failed (likely CORS). Retrying with corsproxy...`);
-              return await fetch(`https://corsproxy.io/?${encodeURIComponent(api)}`, {
-                method: 'POST',
-                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url, downloadMode: 'audio', audioFormat: 'mp3' })
-              });
-            });
-
-            if (res && res.ok) {
-              const data = await res.json();
-              if (data && data.url) {
-                const streamRes = await fetch(data.url).catch(async () => {
-                  return await fetch(`https://corsproxy.io/?${encodeURIComponent(data.url)}`);
-                });
-                if (streamRes && streamRes.ok) {
-                  audioBlob = await streamRes.blob();
-                  break;
-                }
-              }
-            }
-          } catch (e) {
-            console.warn(`Cobalt API ${api} failed completely:`, e);
-          }
-        }
-        if (audioBlob && audioBlob.size > 1000) {
-          // Only send audio if we actually got a valid non-empty file (> 1KB)
-          formData.append('audioFile', audioBlob, 'audio.mp3');
-          console.log(`Successfully captured audio blob: ${audioBlob.size} bytes`);
-        } else {
-          console.warn('Frontend audio capture failed or returned empty file — backend will use its own fallbacks.');
-        }
-      } catch (err) {
-        console.warn('Frontend Cobalt extraction failed:', err);
-      }
-    }
-
     const response = await fetch(`${API_URL}/api/extract`, {
       method: 'POST',
-      body: formData // Let fetch automatically set the multipart/form-data boundary headers
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ url })
     });
-    
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.error || 'Failed to extract link');
@@ -200,7 +137,7 @@ export const workspaceApi = {
     // Use .webm extension to match most browser's MediaRecorder output
     formData.append('audio', audioBlob, 'recording.webm');
 
-    const response = await fetch(`${API_URL}/api/transcribe-voice`, {
+    const response = await fetch('http://localhost:3001/api/transcribe-voice', {
       method: 'POST',
       body: formData,
     });
@@ -210,23 +147,6 @@ export const workspaceApi = {
       throw new Error(errorData.error || 'Failed to transcribe voice');
     }
 
-    return response.json();
-  },
-
-  async uploadFile(file: File): Promise<{ url: string, title: string, content: string, type: string }> {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await fetch(`${API_URL}/api/upload`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Failed to upload file');
-    }
-    
     return response.json();
   },
 

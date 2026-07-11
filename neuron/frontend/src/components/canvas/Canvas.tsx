@@ -26,8 +26,10 @@ import DriveNode from './DriveNode';
 import LoomNode from './LoomNode';
 import DocumentNode from './DocumentNode';
 import ChatNode from './ChatNode';
+import ImageNode from './ImageNode';
+import FileNode from './FileNode';
 import DottedDeleteEdge from './DottedDeleteEdge';
-import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive, Video, Layers, FileText, MessageSquare } from 'lucide-react';
+import { Plus, PlayCircle, Camera, Music2, Loader2, Type, Mic, Square, Circle, HardDrive, Video, Layers, FileText, MessageSquare, Paperclip, Image as ImageIcon } from 'lucide-react';
 import { workspaceApi } from '../../lib/api';
 import { layoutGroupChildren } from '../../utils/gridLayout';
 
@@ -112,6 +114,8 @@ const nodeTypes = {
   loom: LoomNode,
   document: DocumentNode,
   ai_chat: ChatNode,
+  image: ImageNode,
+  file: FileNode,
 };
 
 const edgeTypes = {
@@ -137,6 +141,9 @@ export default function Canvas({ workspaceId }: CanvasProps) {
   const [extracting, setExtracting] = React.useState(false);
   const [extractError, setExtractError] = React.useState('');
   const [isGroupingMode, setIsGroupingMode] = React.useState(false);
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = React.useState(false);
 
   // Voice Recording State
   const [showVoiceModal, setShowVoiceModal] = React.useState(false);
@@ -807,6 +814,64 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
     return true;
   }, [nodes]);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    // Create a temporary loading node
+    const tempId = crypto.randomUUID();
+    const position = {
+      x: window.innerWidth / 2 - 150 + (Math.random() * 50 - 25),
+      y: window.innerHeight / 2 - 100 + (Math.random() * 50 - 25),
+    };
+
+    const targetType = file.type.startsWith('image/') ? 'image' : 'file';
+
+    const tempNode = {
+      id: tempId,
+      type: targetType,
+      position,
+      data: { 
+        isUploading: true,
+        metadata: { title: file.name },
+        customTitle: 'Uploading...'
+      },
+    };
+    addNode(tempNode);
+
+    try {
+      const response = await workspaceApi.uploadFile(file);
+      
+      const finalNode = {
+        id: tempId,
+        type: response.type, // 'image' or 'file'
+        position,
+        data: {
+          metadata: {
+            url: response.url,
+            title: response.title,
+            content: response.content
+          },
+          content: response.content
+        },
+      };
+
+      await workspaceApi.upsertCard(workspaceId, finalNode);
+      useCanvasStore.getState().setNodes(
+        useCanvasStore.getState().nodes.map(n => n.id === tempId ? finalNode : n)
+      );
+    } catch (err: any) {
+      console.error('Upload failed:', err);
+      useCanvasStore.getState().removeNode(tempId);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   return (
     <div className="w-full h-full bg-[#121214]">
       <ReactFlow
@@ -903,6 +968,27 @@ y: (updatedNode as any).positionAbsolute?.y ?? absY,
               </button>
               <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
                 Rich Text
+              </span>
+            </div>
+
+            {/* Upload Image */}
+            <div className="relative group flex items-center justify-center">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload}
+                accept="image/*"
+                className="hidden" 
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className={`p-2.5 rounded-xl transition-all ${isUploading ? 'text-gray-500 animate-pulse' : 'hover:bg-yellow-500/10 text-yellow-500 hover:scale-105 active:scale-95'}`}
+              >
+                {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImageIcon className="w-5 h-5" />}
+              </button>
+              <span className="absolute -top-11 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-[#18181b] text-gray-200 text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-white/10 shadow-xl">
+                {isUploading ? 'Uploading...' : 'Upload Images'}
               </span>
             </div>
 
